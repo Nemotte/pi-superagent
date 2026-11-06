@@ -123,4 +123,4 @@ npm run test:install -- --bundle .artifacts/release --audit
 
 CI 一次生成 `portable-candidate`，由 Linux/macOS/Windows × x64/arm64 六个独立 runner 消费同一个 artifact。消费者不执行工作区 npm ci/build；检查原生安装、Pi RPC 中的真实插件注册、SDK 加载后的完整引导/遮罩测试 key、CLI/Web、Node Job、退出与两个安装根审计。只有常规测试和全部安装矩阵通过，才产生 `portable-verified` artifact；不自动发布 npm。
 
-当前本地已有 **Linux x64** 干净安装与真实 SDK 引导证据。首次 [CI 运行](https://github.com/Nemotte/pi-superagent/actions/runs/42163735807)的 Linux/macOS × x64/arm64 安装测试通过；Windows 两种架构在启动入口报 `INSTALL_ENVIRONMENT_CHANGED`。常规测试也有失败，尚未产生 `portable-verified`；修复并通过矩阵前暂缓 npm 发布。
+[CI 运行 42171893012](https://github.com/Nemotte/pi-superagent/actions/runs/42171893012)已全部通过（源码 `17ddd95`）：Linux/macOS/Windows 三系统完整检查及各 10 轮稳定性测试，六个 OS/架构组合消费同一构建产物的原生安装与审计。已生成 `portable-verified`。Windows 短路径启动问题已修复；本地另完成 20 轮稳定性测试。两个 npm 包尚未发布。
