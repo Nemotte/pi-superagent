@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, realpathSync as fsRealpathSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { WorkspaceSchema, type WorkspaceConfig } from './config.js'
+const realpathSync = fsRealpathSync.native
 const exec = promisify(execFile)
 export interface Gitlink { path: string; commit: string }
 export interface RepositoryInfo { id: string; path: string; source: string; commonDir: string; head: string; dirty: boolean; gitlinks: Gitlink[] }

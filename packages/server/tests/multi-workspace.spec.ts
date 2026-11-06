@@ -1,12 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { git, nestedWorkspace, repository } from './fixtures/workspace.js'
 const mod = await import('../src/multi-workspace.js').catch(() => ({} as any))
 const dirs: string[] = []
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
-function fixture() { const dir = mkdtempSync(join(tmpdir(), 'sa assemble 中文 ')); dirs.push(dir); const root = join(dir, 'app'); mkdirSync(root); return { dir, root, ...nestedWorkspace(root) } }
+function fixture() { const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa assemble 中文 '))); dirs.push(dir); const root = join(dir, 'app'); mkdirSync(root); return { dir, root, ...nestedWorkspace(root) } }
 it('assembles one ticket workspace across frontend, parent and nested gitlink repositories', async () => {
   expect(mod.captureWorkspace).toBeTypeOf('function'); const f = fixture(); const work = join(f.dir, 'work')
   writeFileSync(join(f.child, 'untracked.txt'), 'original-only')

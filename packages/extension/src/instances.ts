@@ -15,7 +15,7 @@ export function sshBinding(binding: Binding): Binding & { ssh: SshTarget & { por
 }
 export interface Instance { schema: number; instanceId: string; repository: string; port: number; workspace?: { repositories: Array<{ id: string; path: string }> } | null }
 export const connectionsDir = () => join(homedir(), '.pi-superagent', 'connections')
-export const canonical = (path: string) => realpathSync(resolve(path))
+export const canonical = (path: string) => realpathSync.native(resolve(path))
 export const pathKey = (path: string) => createHash('sha256').update(process.platform === 'win32' ? path.toLowerCase() : path).digest('hex').slice(0, 24)
 export function suggestedStateDir(repository: string): string { return join(homedir(), '.pi-superagent', `${basename(repository).replace(/[^\p{L}\p{N}_-]/gu, '-').slice(0, 40) || 'project'}-${pathKey(repository).slice(0, 8)}`) }
 async function git(path: string, args: string[]): Promise<string> {

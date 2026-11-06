@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -8,7 +8,7 @@ const dirs: string[] = []
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks() })
 const load = async () => { expect(existsSync(new URL('../src/supervision.ts', import.meta.url))).toBe(true); return import('../src/supervision.js') }
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'sa systemd %$ 雲 ')); dirs.push(root)
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa systemd %$ 雲 '))); dirs.push(root)
   const state = join(root, 'state'), home = join(root, 'home'); mkdirSync(home)
   const socket = createServer(); await new Promise<void>(r => socket.listen(0, '127.0.0.1', r)); const port = (socket.address() as { port: number }).port; await new Promise<void>(r => socket.close(() => r()))
   const config = initialize(state, { repository: root, port, paused: true, management: 'token' })

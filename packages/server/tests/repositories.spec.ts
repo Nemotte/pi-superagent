@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { realpathSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -7,13 +8,14 @@ import { git, nestedWorkspace } from './fixtures/workspace.js'
 const mod = await import('../src/repositories.js').catch(() => ({} as any))
 const dirs: string[] = []
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
-function fixture() { const root = mkdtempSync(join(tmpdir(), 'sa discover 中文 ')); dirs.push(root); return { root, ...nestedWorkspace(root) } }
+function fixture() { const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa discover 中文 '))); dirs.push(root); return { root, ...nestedWorkspace(root) } }
 it('does not lazily fetch missing objects from a partial clone during host Git checks', async () => {
   const f = fixture(), partial = join(f.root, 'partial')
   git(f.front, 'config', 'uploadpack.allowFilter', 'true')
-  git(f.root, '-c', 'protocol.file.allow=always', 'clone', '--filter=blob:none', '--no-checkout', pathToFileURL(f.front).href, partial)
+  const clone = spawnSync('git', ['-C', f.root, '-c', 'protocol.file.allow=always', 'clone', '--filter=blob:none', '--no-checkout', pathToFileURL(f.front).href, partial], { encoding: 'utf8' })
+  expect(clone.status, clone.stderr).toBe(0)
   const blob = git(f.front, 'rev-parse', 'HEAD:README.md'), packs = join(partial, '.git', 'objects', 'pack')
-  expect(git(partial, 'rev-list', '--objects', '--missing=print', 'HEAD')).toContain('?' + blob)
+  expect(await mod.repositoryGit(partial, 'rev-list', '--objects', '--missing=print', 'HEAD'), `${git(f.root, '--version')}\n${clone.stderr}`).toContain('?' + blob)
   const before = readdirSync(packs).sort()
   await expect(mod.repositoryGit(partial, 'cat-file', '-e', blob)).rejects.toThrow()
   expect(readdirSync(packs).sort()).toEqual(before)

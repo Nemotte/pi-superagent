@@ -3,7 +3,7 @@ import { lockSync } from 'proper-lockfile'
 import * as supervision from '../src/supervision.js'
 import { planService } from '../src/supervision-config.js'
 import { fileURLToPath } from 'node:url'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, symlinkSync, statSync, chmodSync, linkSync, cpSync, readlinkSync, utimesSync } from 'node:fs'
+import { existsSync, realpathSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, symlinkSync, statSync, chmodSync, linkSync, cpSync, readlinkSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir, hostname, userInfo } from 'node:os'
 import { spawn } from 'node:child_process'
@@ -25,7 +25,7 @@ function reseal(path: string, data: any) {
 }
 const driver = { send: async () => {}, stop: async () => {}, close: async () => {} }
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'sa backup 中文 ')); dirs.push(root)
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa backup 中文 '))); dirs.push(root)
   const repo = join(root, 'repo'), state = join(root, 'state'), backups = join(root, 'backups'); mkdirSync(backups); repository(repo)
   const config = initialize(state, { repository: repo, port: randomInt(20000, 30000), paused: true, management: 'token' })
   const runtime = new Runtime(state, driver); runtime.submit({ id: 'durable', text: 'Keep the accepted request' }); await runtime.close()

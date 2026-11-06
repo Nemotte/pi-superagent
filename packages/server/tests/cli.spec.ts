@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest'
+import { resolve } from 'node:path'
 const mod = await import('../src/cli-options.js').catch(() => ({} as any))
 it('parses paths with spaces and Unicode without shell interpolation', () => {
   expect(mod.parseArgs).toBeTypeOf('function')
-  expect(mod.parseArgs(['init', '--state-dir', '/tmp/state 一', '--repo', '/tmp/repo space', '--port', '4321'])).toMatchObject({ command: 'init', stateDir: '/tmp/state 一', repository: '/tmp/repo space', port: 4321 })
+  expect(mod.parseArgs(['init', '--state-dir', '/tmp/state 一', '--repo', '/tmp/repo space', '--port', '4321'])).toMatchObject({ command: 'init', stateDir: resolve('/tmp/state 一'), repository: resolve('/tmp/repo space'), port: 4321 })
 })
 it('supports a paused single-worker bootstrap without changing normal init defaults', () => {
   expect(mod.parseArgs(['init', '--paused', '--max-workers', '1'])).toMatchObject({ paused: true, maxWorkers: 1 })

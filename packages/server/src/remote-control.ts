@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, realpathSync as fsRealpathSync } from 'node:fs'
+const realpathSync = fsRealpathSync.native
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'

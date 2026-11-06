@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { realpathSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -8,7 +8,7 @@ const mod = await import('../src/remote.js').catch(() => ({} as any))
 const roots: string[] = []
 afterEach(() => roots.splice(0).forEach(d => rmSync(d, { recursive: true, force: true })))
 function fixture() {
-  const project = mkdtempSync(join(tmpdir(), 'sa ssh ui ')); roots.push(project)
+  const project = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa ssh ui '))); roots.push(project)
   const info = { protocol: 1, instanceId: randomUUID(), stateDir: '/srv/private', repository: '/srv/app', port: 4317, management: 'token', online: true, status: { paused: true, busyWorkers: 0 } }
   const ctx = { cwd: project, hasUI: true, ui: { input: vi.fn().mockResolvedValueOnce('cloud').mockResolvedValueOnce('node').mockResolvedValueOnce('/opt/sa/dist/cli.js').mockResolvedValueOnce('/srv/private'), select: vi.fn(async (_title: string, choices: string[]) => choices[0]), confirm: vi.fn(async () => true), notify: vi.fn(), setStatus: vi.fn(), setWidget: vi.fn() } }
   const services = { connections: join(project, 'connections'), request: vi.fn(async (_target: unknown, request: any) => request.operation === 'environment' ? { protocol: 1, home: '/home/test' } : info), connect: vi.fn(async () => ({ endpoint: 'http://127.0.0.1:4317' })), disconnect: vi.fn(async () => {}) }

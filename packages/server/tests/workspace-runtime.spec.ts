@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { realpathSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { initialize } from '../src/config.js'
@@ -8,7 +8,7 @@ import { git, nestedWorkspace } from './fixtures/workspace.js'
 const resources: Array<{ dir: string; runtime: Runtime }> = []
 afterEach(async () => { for (const r of resources.splice(0)) { await r.runtime.close(); rmSync(r.dir, { recursive: true, force: true }) } })
 async function fixture(selected?: string[]) {
-  const dir = mkdtempSync(join(tmpdir(), 'sa workspace runtime ')), root = join(dir, 'app'); mkdirSync(root)
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa workspace runtime '))), root = join(dir, 'app'); mkdirSync(root)
   const repos = nestedWorkspace(root), state = join(dir, 'state')
   initialize(state, { repository: root, workspace: { repositories: repos.members.filter(m => !selected || selected.includes(m.id)) } })
   const messages: any[] = []; const driver = { send: async (target: any, delivery: any) => { messages.push({ target, delivery }) }, stop: async () => {}, close: async () => {} }

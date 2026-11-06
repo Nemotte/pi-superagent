@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { realpathSync, mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -11,7 +11,7 @@ const mod = await import('../src/service-control.js').catch(() => ({} as any))
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function fixture(management: 'local' | 'token' = 'token') {
-  const dir = mkdtempSync(join(tmpdir(), 'sa restart 中文 ')), repository = join(dir, 'repo'), stateDir = join(dir, 'state')
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa restart 中文 '))), repository = join(dir, 'repo'), stateDir = join(dir, 'state')
   mkdirSync(repository); cleanups.push(async () => rmSync(dir, { recursive: true, force: true }))
   const config = initialize(stateDir, { repository, management, port: await availablePort(), paused: true, maxWorkers: 1 })
   const launch = async () => {
@@ -107,7 +107,10 @@ it('starts an already stopped local instance after confirmation, but treats an o
   await mod.restartService(f.ctx, f.connection, { prepareStart: f.prepareStart })
   expect(f.start).toHaveBeenCalledOnce(); expect(f.ctx.ui.confirm.mock.calls[0].join(' ')).toContain('未运行')
   await f.current().close()
-  const occupant = createServer(socket => { socket.resume(); socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n') })
+  const occupant = createServer(socket => {
+    socket.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'ECONNRESET') throw error })
+    socket.resume(); socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
+  })
   await new Promise<void>(resolve => occupant.listen(f.config.port, '127.0.0.1', resolve))
   cleanups.push(() => new Promise(resolve => occupant.close(() => resolve())))
   await expect(mod.restartService(f.ctx, f.connection, { prepareStart: f.prepareStart })).rejects.toThrow(/身份|占用/)

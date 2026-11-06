@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { realpathSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -9,7 +9,7 @@ const mod = await import('../src/remote-connections.js').catch(() => ({} as any)
 const cleanup: Array<() => unknown> = []
 afterEach(async () => { await mod.closeRemoteConnections?.(); for (const f of cleanup.splice(0).reverse()) await f() })
 function fixture(port = 4317) {
-  const project = mkdtempSync(join(tmpdir(), 'sa remote client ')); cleanup.push(() => rmSync(project, { recursive: true, force: true }))
+  const project = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa remote client '))); cleanup.push(() => rmSync(project, { recursive: true, force: true }))
   const binding = { project, repository: '/srv/cloud/repo', stateDir: '/srv/cloud/private', instanceId: randomUUID(), ssh: { host: 'cloud-test', node: 'node', cliPath: '/opt/sa/dist/cli.js', port } }
   return { project, directory: join(project, 'connections'), binding }
 }

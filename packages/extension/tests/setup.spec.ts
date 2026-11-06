@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, realpathSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { initialize, readConfig } from '../../server/src/config.js'
@@ -12,7 +12,7 @@ const mod = await import('../src/setup.js').catch(() => ({} as any))
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const f of cleanups.reverse().splice(0)) await f() })
 async function fixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'sa wizard ')); cleanups.push(async () => rmSync(dir, { recursive: true, force: true }))
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa wizard '))); cleanups.push(async () => rmSync(dir, { recursive: true, force: true }))
   const repo = join(dir, 'repo'); mkdirSync(repo); const state = join(dir, 'state')
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe' })
   git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.com'); writeFileSync(join(repo, 'README.md'), 'hello'); git('add', '.'); git('commit', '-m', 'initial')

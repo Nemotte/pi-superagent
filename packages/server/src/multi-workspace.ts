@@ -1,4 +1,5 @@
-import { mkdirSync, realpathSync, lstatSync } from 'node:fs'
+import { mkdirSync, realpathSync as fsRealpathSync, lstatSync } from 'node:fs'
+const realpathSync = fsRealpathSync.native
 import { relative, sep, dirname } from 'node:path'
 import type { WorkspaceConfig } from './config.js'
 import { memberPath, repositoryGit, validateWorkspace, type RepositoryInfo } from './repositories.js'

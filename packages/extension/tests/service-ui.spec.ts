@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, realpathSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { initialize } from '../../server/src/config.js'
@@ -7,7 +7,7 @@ const dirs: string[] = []
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 const load = async () => { expect(existsSync(new URL('../src/service-ui.ts', import.meta.url))).toBe(true); return import('../src/service-ui.js') }
 function fixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'sa service ui ')); dirs.push(dir)
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa service ui '))); dirs.push(dir)
   const config = initialize(join(dir, 'state'), { repository: dir })
   const binding = { project: dir, repository: dir, stateDir: join(dir, 'state'), instanceId: config.instanceId }
   const ctx: any = { hasUI: true, ui: { select: vi.fn(), confirm: vi.fn(async () => true), notify: vi.fn() } }

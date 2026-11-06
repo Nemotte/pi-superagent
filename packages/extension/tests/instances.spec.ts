@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync, existsSync } from 'node:fs'
+import { realpathSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
@@ -7,7 +7,7 @@ const mod = await import('../src/instances.js').catch(() => ({} as any))
 const dirs: string[] = []
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 function fixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'sa setup 中文 ')); dirs.push(dir)
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa setup 中文 '))); dirs.push(dir)
   const repo = join(dir, 'repo'); mkdirSync(repo)
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: 'pipe' })
   git('init'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.com')

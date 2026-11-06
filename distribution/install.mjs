@@ -77,11 +77,11 @@ async function preflight(npmCli) {
 export function launcherSource(kind) {
   if (!['pi', 'superagent'].includes(kind)) fail('INSTALL_LAUNCHER')
   return `import {spawn} from 'node:child_process';
-import {readFileSync,existsSync} from 'node:fs';
+import {readFileSync,existsSync,realpathSync} from 'node:fs';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const root=dirname(fileURLToPath(import.meta.url));
 try {
+  const root=realpathSync.native(dirname(fileURLToPath(import.meta.url)));
   if(existsSync(join(root,'.installing'))) throw Error('INSTALL_INCOMPLETE');
   const record=JSON.parse(readFileSync(join(root,'installation.json'),'utf8'));
   if(record.format!==1||record.root!==root||record.platform!==process.platform||record.arch!==process.arch||Number(process.versions.node.split('.')[0])<24) throw Error('INSTALL_ENVIRONMENT_CHANGED');

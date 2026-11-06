@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, realpathSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -11,7 +11,7 @@ const mod: any = await import('../src/remote-control.js')
 const cleanup: Array<() => unknown> = []
 afterEach(async () => { for (const f of cleanup.splice(0).reverse()) await f(); vi.restoreAllMocks() })
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'sa remote 雲 ')); cleanup.push(() => rmSync(root, { recursive: true, force: true }))
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa remote 雲 '))); cleanup.push(() => rmSync(root, { recursive: true, force: true }))
   const repo = join(root, "repo ' spaced"); repository(repo)
   return { root, repo, state: join(root, 'private state') }
 }
