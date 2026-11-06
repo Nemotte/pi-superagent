@@ -21,10 +21,10 @@ export async function loadBootstrap(): Promise<Bootstrap> {
     if (!isAbsolute(process.env.PI_SUPERAGENT_SERVER)) throw Error('PI_SUPERAGENT_SERVER 必须是服务 CLI 的绝对路径。')
     entry = join(dirname(process.env.PI_SUPERAGENT_SERVER), 'bootstrap.js')
   } else {
-    try { entry = createRequire(import.meta.url).resolve('@pi-superagent/server/bootstrap') }
+    try { entry = createRequire(import.meta.url).resolve('@nemotte/pi-superagent/bootstrap') }
     catch { entry = fileURLToPath(new URL('../../server/dist/bootstrap.js', import.meta.url)) }
   }
-  if (!existsSync(entry)) throw Error('未找到 Super-agent 服务包。请先构建/安装 @pi-superagent/server，或将 PI_SUPERAGENT_SERVER 设为其 dist/cli.js 绝对路径；插件仍可连接已有服务。')
+  if (!existsSync(entry)) throw Error('未找到 Super-agent 服务包。请先构建/安装 @nemotte/pi-superagent，或将 PI_SUPERAGENT_SERVER 设为其 dist/cli.js 绝对路径；插件仍可连接已有服务。')
   const backend = await import(pathToFileURL(entry).href) as Bootstrap
   if (backend.protocol !== 1 || typeof backend.setupEnvironment !== 'function') throw Error('服务包与插件的初始化协议不兼容。')
   return backend

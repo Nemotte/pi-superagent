@@ -3,6 +3,22 @@ import { expect, it } from 'vitest'
 const json = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'))
 const sdk = '@earendil-works/pi-coding-agent', tui = '@earendil-works/pi-tui'
 
+it('coordinates public alpha package names, metadata and workspace links', () => {
+  const lock = json('../../../package-lock.json')
+  for (const [directory, name] of [['server', '@nemotte/pi-superagent'], ['extension', '@nemotte/pi-superagent-extension']]) {
+    const pkg = json(`../../${directory}/package.json`)
+    expect(pkg.name).toBe(name)
+    expect(pkg.version).toBe('0.1.0-alpha.1')
+    expect(pkg.publishConfig).toEqual({ access: 'public', tag: 'alpha', registry: 'https://registry.npmjs.org' })
+    expect(pkg.repository).toEqual({ type: 'git', url: 'git+https://github.com/Nemotte/pi-superagent.git', directory: `packages/${directory}` })
+    expect(pkg.homepage).toBe('https://github.com/Nemotte/pi-superagent#readme')
+    expect(pkg.bugs.url).toBe('https://github.com/Nemotte/pi-superagent/issues')
+    expect(lock.packages[`packages/${directory}`].name).toBe(name)
+    expect(lock.packages[`node_modules/${name}`]).toEqual({ resolved: `packages/${directory}`, link: true })
+  }
+  expect(JSON.stringify(lock)).not.toContain('@pi-superagent/')
+})
+
 it('pins the repaired SDK and coordinates the plugin host minimum without bundling another SDK', () => {
   const server = json('../package.json'), extension = json('../../extension/package.json')
   expect(server.dependencies[sdk]).toBe('1.5.0')

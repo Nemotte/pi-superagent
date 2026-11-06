@@ -53,8 +53,9 @@ export async function validateBundle(root) {
   }
   for (const [dir, name] of [['runtime', 'server'], ['client', 'extension']]) {
     const pkg = await json(path.join(root, dir, 'package.json')), lock = await json(path.join(root, dir, 'package-lock.json'))
-    const dependencies = { [`@pi-superagent/${name}`]: `file:../packages/${name}.tgz` }
-    if (JSON.stringify(pkg.dependencies) !== JSON.stringify(dependencies) || lock.lockfileVersion !== 3 || JSON.stringify(lock.packages?.['']?.dependencies) !== JSON.stringify(dependencies) || lock.packages?.[`node_modules/@pi-superagent/${name}`]?.version !== manifest.version) fail('INSTALL_LOCK')
+    const packageName = name === 'server' ? '@nemotte/pi-superagent' : '@nemotte/pi-superagent-extension'
+    const dependencies = { [packageName]: `file:../packages/${name}.tgz` }
+    if (JSON.stringify(pkg.dependencies) !== JSON.stringify(dependencies) || lock.lockfileVersion !== 3 || JSON.stringify(lock.packages?.['']?.dependencies) !== JSON.stringify(dependencies) || lock.packages?.[`node_modules/${packageName}`]?.version !== manifest.version) fail('INSTALL_LOCK')
     if (dir === 'client' && Object.keys(lock.packages).length !== 2) fail('INSTALL_PLUGIN_DEPENDENCIES')
     if (dir === 'runtime' && lock.packages['node_modules/@earendil-works/pi-coding-agent']?.version !== manifest.sdk) fail('INSTALL_SDK')
   }
@@ -84,7 +85,7 @@ try {
   if(existsSync(join(root,'.installing'))) throw Error('INSTALL_INCOMPLETE');
   const record=JSON.parse(readFileSync(join(root,'installation.json'),'utf8'));
   if(record.format!==1||record.root!==root||record.platform!==process.platform||record.arch!==process.arch||Number(process.versions.node.split('.')[0])<24) throw Error('INSTALL_ENVIRONMENT_CHANGED');
-  const server=join(root,'runtime/node_modules/@pi-superagent/server/dist/cli.js');
+  const server=join(root,'runtime/node_modules/@nemotte/pi-superagent/dist/cli.js');
   const pi=join(root,'runtime/node_modules/@earendil-works/pi-coding-agent/dist/cli.js');
   const sdk=JSON.parse(readFileSync(join(root,'runtime/node_modules/@earendil-works/pi-coding-agent/package.json'),'utf8'));
   if(sdk.version!==record.sdk) throw Error('INSTALL_SDK_CHANGED');
@@ -120,9 +121,9 @@ export async function install(bundle, destination, { confirmed = false, npmCli }
     const home = path.join(destination, 'installer-home'), env = installEnvironment(home)
     for (const file of ['user.npmrc', 'global.npmrc']) await fs.writeFile(path.join(home, file), '', { mode: 0o600, flag: 'wx' })
     for (const dir of ['runtime', 'client']) await command(process.execPath, [tools.npm, 'ci', '--prefix', path.join(destination, dir), '--workspaces=false', '--ignore-scripts', '--omit=dev', '--include=optional', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], path.join(destination, dir), env, 'NPM_' + dir.toUpperCase())
-    const pi = path.join(destination, 'runtime/node_modules/@earendil-works/pi-coding-agent/dist/cli.js'), server = path.join(destination, 'runtime/node_modules/@pi-superagent/server/dist/cli.js')
+    const pi = path.join(destination, 'runtime/node_modules/@earendil-works/pi-coding-agent/dist/cli.js'), server = path.join(destination, 'runtime/node_modules/@nemotte/pi-superagent/dist/cli.js')
     if (await command(process.execPath, [pi, '--version'], destination, env, 'PI') !== manifest.sdk || await command(process.execPath, [server, '--version'], destination, env, 'SERVER') !== manifest.version) fail('INSTALL_VERSION')
-    await command(process.execPath, [pi, 'install', path.join(destination, 'client/node_modules/@pi-superagent/extension')], destination, { ...env, PI_CODING_AGENT_DIR: path.join(destination, 'profile') }, 'REGISTER')
+    await command(process.execPath, [pi, 'install', path.join(destination, 'client/node_modules/@nemotte/pi-superagent-extension')], destination, { ...env, PI_CODING_AGENT_DIR: path.join(destination, 'profile') }, 'REGISTER')
     const probe = `const {DefaultResourceLoader}=await import(${JSON.stringify(pathToFileURL(path.join(path.dirname(pi), 'index.js')).href)});const loader=new DefaultResourceLoader({cwd:${JSON.stringify(destination)},agentDir:${JSON.stringify(path.join(destination, 'profile'))},noContextFiles:true,noSkills:true,noThemes:true,noPromptTemplates:true});await loader.reload();const loaded=loader.getExtensions();if(loaded.errors.length||!loaded.extensions.some(e=>e.commands.has('superagent')))process.exit(1)`
     await command(process.execPath, ['--input-type=module', '-e', probe], destination, env, 'PLUGIN')
     await fs.rm(home, { recursive: true })

@@ -10,7 +10,7 @@
 
 ## 已落地
 
-- npm workspace：`@pi-superagent/server`、`@pi-superagent/extension`，版本 `0.1.0-alpha.1`。
+- npm workspace：`@nemotte/pi-superagent`、`@nemotte/pi-superagent-extension`，版本 `0.1.0-alpha.1`，配置为 public / alpha；尚未发布。
 - 上游领域核心及领域测试独立移植；保留 MIT 许可证和来源。
 - SQLite 仓储、事务回滚、持久 Effects generation、重试、Outbox 手工渠道收据、审计及版本化配置。
 - 实例锁、人工请求幂等、授权检查、暂停、跟进、停止、失败重试及重启恢复接线。

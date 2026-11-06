@@ -1,4 +1,4 @@
-# @pi-superagent/extension
+# @nemotte/pi-superagent-extension
 
 Pi 项目入口，管理本地或 SSH 云服务器上的独立 Pi Super-agent 服务。GitHub 是可选渠道，基础使用不需要 GitHub 账号或 PAT。插件使用宿主 Pi 的 UI；模型认证和后台执行使用执行主机上服务包固定的 SDK。
 
@@ -82,7 +82,7 @@ token 模式手动连接其他客户端时运行 `/superagent token`：确认后
 
 ## 服务包与认证
 
-要求 Pi 1.5+（1.x）/ API v1；SDK/TUI 开发依赖固定 1.5.0，optional peer 下限为 ^1.5.0。升级宿主 Pi 后重新启动 Pi，再 `/reload` 加载插件；已运行服务另外通过 `/superagent restart` 确认加载新版依赖。本地执行时服务包需在本机存在，SSH 执行时只需在远端存在；插件不安装另一份 SDK。初始化优先定位 `@pi-superagent/server/bootstrap`，本地 workspace 可自动发现相邻服务包。其他布局可设置 `PI_SUPERAGENT_SERVER=/absolute/path/to/server/dist/cli.js`。
+要求 Pi 1.5+（1.x）/ API v1；SDK/TUI 开发依赖固定 1.5.0，optional peer 下限为 ^1.5.0。升级宿主 Pi 后重新启动 Pi，再 `/reload` 加载插件；已运行服务另外通过 `/superagent restart` 确认加载新版依赖。本地执行时服务包需在本机存在，SSH 执行时只需在远端存在；插件不安装另一份 SDK。初始化优先定位 `@nemotte/pi-superagent/bootstrap`，本地 workspace 可自动发现相邻服务包。其他布局可设置 `PI_SUPERAGENT_SERVER=/absolute/path/to/server/dist/cli.js`。
 
 认证仅写入实例 `agent/auth.json`，不复制个人 Pi/gh 凭据或启动环境中的模型密钥。API key 和手工 OAuth 回调输入采用终端遮罩，通过 IPC 传递，不写聊天或进程参数。兼容端点可预先配置实例 `agent/models.json`。没有交互登录方法的提供商需先配置该实例的凭据。
 

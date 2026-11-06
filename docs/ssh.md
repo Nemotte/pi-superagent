@@ -7,7 +7,7 @@
 首版要求远端已有：
 
 - Linux、Node.js 24+、Git。
-- 与本机插件同版的 `@pi-superagent/server` 服务包。
+- 与本机插件同版的 `@nemotte/pi-superagent` 服务包。
 - 至少有一个提交的 Git checkout；多仓库应用准备好需要参与的成员。
 - SSH 公钥/agent 免交互认证，主机指纹已由用户核对。
 
@@ -17,13 +17,13 @@
 # 产品工程内
 npm ci --ignore-scripts
 npm run build
-npm pack --workspace @pi-superagent/server
+npm pack --workspace @nemotte/pi-superagent
 
 # 用户将 tarball 复制到远端后，在远端独立安装目录运行
-npm install --ignore-scripts /absolute/path/pi-superagent-server-0.1.0-alpha.1.tgz
+npm install --ignore-scripts /absolute/path/nemotte-pi-superagent-0.1.0-alpha.1.tgz
 ```
 
-安装后的 CLI 通常为 `/absolute/install-dir/node_modules/@pi-superagent/server/dist/cli.js`。插件会使用旁边的 `remote-child.js` 控制桥。不要将实例目录放进服务包、应用仓库或工作区；使用类似 `/home/me/.pi-superagent/my-app` 的私有目录。
+安装后的 CLI 通常为 `/absolute/install-dir/node_modules/@nemotte/pi-superagent/dist/cli.js`。插件会使用旁边的 `remote-child.js` 控制桥。不要将实例目录放进服务包、应用仓库或工作区；使用类似 `/home/me/.pi-superagent/my-app` 的私有目录。
 
 在本机终端先验证 SSH：
 

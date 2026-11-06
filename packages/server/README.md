@@ -1,4 +1,4 @@
-# @pi-superagent/server
+# @nemotte/pi-superagent
 
 Persistent single-administrator Super-agent service using Pi SDK 1.5.0. One instance can coordinate an application workspace containing multiple cooperating Git repositories. Includes the `pi-superagent` CLI and bundled Web UI.
 

@@ -24,14 +24,14 @@ try {
   const args = [join(bundle, 'install.mjs'), '--destination', destination]
   const preview = JSON.parse(await run(process.execPath, args)); assert.equal(preview.installed, false); assert(!existsSync(destination))
   const installed = JSON.parse(await run(process.execPath, [...args, '--yes'])); assert.equal(installed.installed, true); assert.equal(installed.started, false)
-  assert.equal(installed.serverCli, join(installed.destination, 'runtime/node_modules/@pi-superagent/server/dist/cli.js'))
+  assert.equal(installed.serverCli, join(installed.destination, 'runtime/node_modules/@nemotte/pi-superagent/dist/cli.js'))
   assert.equal(installed.node, process.execPath)
   assert(!existsSync(join(destination, 'installer-home')), 'temporary npm configuration/cache must not remain in the installation')
   assert.equal(readFileSync(join(home, 'package.json'), 'utf8'), parentPackage)
   assert(!existsSync(join(home, 'node_modules'))); assert(!existsSync(join(home, 'package-lock.json')))
   assert(!existsSync(env.PI_CODING_AGENT_DIR)); assert(!existsSync(join(destination, '.installing')))
   const clientLock = JSON.parse(readFileSync(join(destination, 'client/package-lock.json')))
-  assert.deepEqual(Object.keys(clientLock.packages).sort(), ['', 'node_modules/@pi-superagent/extension'])
+  assert.deepEqual(Object.keys(clientLock.packages).sort(), ['', 'node_modules/@nemotte/pi-superagent-extension'])
   const pi = join(destination, 'pi.mjs'); server = join(destination, 'superagent.mjs')
   assert.equal(await run(process.execPath, [pi, '--version']), '1.5.0')
   assert.equal(await run(process.execPath, [server, '--version']), '0.1.0-alpha.1')
@@ -74,7 +74,7 @@ custom:factory=>new Promise(resolve=>{const c=factory({requestRender(){}},{},{},
 try {await command.handler('setup',ctx);assert(!notices.some(n=>n.type==='error'),JSON.stringify(notices));assert(existsSync(state+'/agent/auth.json'));assert.equal(JSON.parse(readFileSync(state+'/agent/auth.json')).openai.key,key);assert(!JSON.stringify(notices).includes(key));}
 finally {if(existsSync(state+'/config.json')) await promisify(execFile)(process.execPath,[${JSON.stringify(server)},'shutdown','--state-dir',state]).catch(()=>{});}
 `)
-  await run(process.execPath, [wizard], repo, { ...env, PI_SUPERAGENT_SERVER: join(destination, 'runtime/node_modules/@pi-superagent/server/dist/cli.js'), PI_CODING_AGENT_DIR: join(destination, 'profile') })
+  await run(process.execPath, [wizard], repo, { ...env, PI_SUPERAGENT_SERVER: join(destination, 'runtime/node_modules/@nemotte/pi-superagent/dist/cli.js'), PI_CODING_AGENT_DIR: join(destination, 'profile') })
   for (let i = 0; i < 100 && existsSync(wizardState + '.lock'); i++) await sleep(50)
   assert(!existsSync(wizardState + '.lock'))
   const listener = createServer(); await new Promise(r => listener.listen(0, '127.0.0.1', r)); const port = listener.address().port; await new Promise(r => listener.close(r))
@@ -85,7 +85,7 @@ finally {if(existsSync(state+'/config.json')) await promisify(execFile)(process.
   const url = `http://127.0.0.1:${port}`; assert((await fetch(url).then(r => r.text())).includes('Pi Super-agent'))
   const input = JSON.parse(await cli('request', 'Portable installation test', '--id', 'portable-once'))
   assert.equal(JSON.parse(await cli('request', 'Portable installation test', '--id', 'portable-once')).id, input.id)
-  const installedServer = join(destination, 'runtime/node_modules/@pi-superagent/server/dist')
+  const installedServer = join(destination, 'runtime/node_modules/@nemotte/pi-superagent/dist')
   const { Jobs } = await import(pathToFileURL(join(installedServer, 'jobs.js')).href)
   const jobs = new Jobs(join(state, 'fixture-jobs'), repo)
   try {

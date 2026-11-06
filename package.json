@@ -5,7 +5,7 @@
   "workspaces": ["packages/*"],
   "engines": { "node": ">=24" },
   "scripts": {
-    "build": "npm run build --workspace @pi-superagent/server && npm run build --workspace @pi-superagent/extension",
+    "build": "npm run build --workspace @nemotte/pi-superagent && npm run build --workspace @nemotte/pi-superagent-extension",
     "typecheck": "tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/extension/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:integration": "node scripts/smoke.mjs && node scripts/smoke.mjs --proxy && node scripts/workspace-smoke.mjs && node scripts/ssh-smoke.mjs && node scripts/systemd-smoke.mjs && node scripts/backup-smoke.mjs",

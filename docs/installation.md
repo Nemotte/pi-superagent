@@ -71,7 +71,7 @@ CLI 使用另一个入口：
 node "$HOME/.pi-superagent/application/superagent.mjs" --help
 ```
 
-服务包位于 `INSTALL/runtime/node_modules/@pi-superagent/server`。SSH Linux 执行主机也可使用同一发布包安装；在本机 Pi 的 SSH 向导中填安装回执中的 **node 和 serverCli**，不是 superagent.mjs 包装入口。仓库 checkout、SSH 信任和密钥仍由管理员准备，见 [SSH 指南](ssh.md)。
+服务包位于 `INSTALL/runtime/node_modules/@nemotte/pi-superagent`。SSH Linux 执行主机也可使用同一发布包安装；在本机 Pi 的 SSH 向导中填安装回执中的 **node 和 serverCli**，不是 superagent.mjs 包装入口。仓库 checkout、SSH 信任和密钥仍由管理员准备，见 [SSH 指南](ssh.md)。
 
 ## 安装布局与现有 Pi
 
@@ -123,4 +123,4 @@ npm run test:install -- --bundle .artifacts/release --audit
 
 CI 一次生成 `portable-candidate`，由 Linux/macOS/Windows × x64/arm64 六个独立 runner 消费同一个 artifact。消费者不执行工作区 npm ci/build；检查原生安装、Pi RPC 中的真实插件注册、SDK 加载后的完整引导/遮罩测试 key、CLI/Web、Node Job、退出与两个安装根审计。只有常规测试和全部安装矩阵通过，才产生 `portable-verified` artifact；不自动发布 npm。
 
-当前本地已有 **Linux x64** 干净安装与真实 SDK 引导证据。其他平台的 CI/实机结果尚未取得；产品仓库的远端运行结果见 [GitHub Actions](https://github.com/Nemotte/pi-superagent/actions)。支持平台的发布结论以实际矩阵结果为准。
+当前本地已有 **Linux x64** 干净安装与真实 SDK 引导证据。首次 [CI 运行](https://github.com/Nemotte/pi-superagent/actions/runs/42163735807)的 Linux/macOS × x64/arm64 安装测试通过；Windows 两种架构在启动入口报 `INSTALL_ENVIRONMENT_CHANGED`。常规测试也有失败，尚未产生 `portable-verified`；修复并通过矩阵前暂缓 npm 发布。

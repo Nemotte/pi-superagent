@@ -17,9 +17,10 @@ function fixture() {
   for (const name of ['server', 'extension']) { mkdirSync(join(bundle, 'packages'), { recursive: true }); writeFileSync(join(bundle, 'packages', name + '.tgz'), name) }
   for (const [dir, name] of [['runtime', 'server'], ['client', 'extension']]) {
     mkdirSync(join(bundle, dir))
-    const dependencies = { [`@pi-superagent/${name}`]: `file:../packages/${name}.tgz` }
+    const packageName = name === 'server' ? '@nemotte/pi-superagent' : '@nemotte/pi-superagent-extension'
+    const dependencies = { [packageName]: `file:../packages/${name}.tgz` }
     writeFileSync(join(bundle, dir, 'package.json'), JSON.stringify({ private: true, dependencies }))
-    writeFileSync(join(bundle, dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: { '': { dependencies }, [`node_modules/@pi-superagent/${name}`]: { version: '0.1.0-alpha.1' }, ...(dir === 'runtime' ? { 'node_modules/@earendil-works/pi-coding-agent': { version: '1.5.0' } } : {}) } }))
+    writeFileSync(join(bundle, dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: { '': { dependencies }, [`node_modules/${packageName}`]: { version: '0.1.0-alpha.1' }, ...(dir === 'runtime' ? { 'node_modules/@earendil-works/pi-coding-agent': { version: '1.5.0' } } : {}) } }))
   }
   writeFileSync(join(bundle, 'install.mjs'), readFileSync(moduleURL))
   for (const path of ['install.mjs', 'packages/server.tgz', 'packages/extension.tgz', 'runtime/package.json', 'runtime/package-lock.json', 'client/package.json', 'client/package-lock.json']) files[path] = createHash('sha256').update(readFileSync(join(bundle, path))).digest('hex')
@@ -81,8 +82,8 @@ if(p.basename(process.cwd())==='runtime'){
 put('node_modules/@earendil-works/pi-coding-agent/package.json',JSON.stringify({type:'module',version:'1.5.0'}));
 put('node_modules/@earendil-works/pi-coding-agent/dist/cli.js',"console.log(process.argv[2]==='--version'?'1.5.0':'registered')");
 put('node_modules/@earendil-works/pi-coding-agent/dist/index.js',"export class DefaultResourceLoader {async reload(){throw Error('private-loader-error')}}");
-put('node_modules/@pi-superagent/server/dist/cli.js',"console.log('0.1.0-alpha.1')");
-}else put('node_modules/@pi-superagent/extension/package.json',JSON.stringify({name:'@pi-superagent/extension',version:'0.1.0-alpha.1'}));`)
+put('node_modules/@nemotte/pi-superagent/dist/cli.js',"console.log('0.1.0-alpha.1')");
+}else put('node_modules/@nemotte/pi-superagent-extension/package.json',JSON.stringify({name:'@nemotte/pi-superagent-extension',version:'0.1.0-alpha.1'}));`)
   await expect(m.install(f.bundle, f.destination, { confirmed: true, npmCli: cli })).rejects.toThrow(/^INSTALL_PLUGIN$/)
   expect(existsSync(f.destination)).toBe(false)
 })
@@ -96,7 +97,7 @@ it('native launchers preserve argv, bind the private profile/server and reject i
   const args = ['literal ; $ % & " 中文', '--flag']
   const output = JSON.parse((await exec(process.execPath, [launcher, ...args], { env: { ...process.env, PI_CODING_AGENT_DIR: 'personal-profile', PI_CODING_AGENT_SESSION_DIR: 'personal-sessions', PI_SUPERAGENT_SERVER: 'wrong-server' } })).stdout)
   expect(output.args).toEqual(args); expect(output.sessionDir).toBeUndefined(); expect(output.profile).toBe(join(realpathSync(f.destination), 'profile'))
-  expect(output.server).toBe(join(realpathSync(f.destination), 'runtime/node_modules/@pi-superagent/server/dist/cli.js'))
+  expect(output.server).toBe(join(realpathSync(f.destination), 'runtime/node_modules/@nemotte/pi-superagent/dist/cli.js'))
   writeFileSync(join(f.destination, '.installing'), '1')
   await expect(exec(process.execPath, [launcher])).rejects.toThrow(/INSTALL_INCOMPLETE/)
 })

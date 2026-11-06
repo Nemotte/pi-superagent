@@ -17,7 +17,7 @@ try {
   mkdirSync(tarballs); mkdirSync(clean); writeFileSync(join(clean, 'package.json'), '{"private":true,"type":"module"}\n')
   const paths = []
   for (const name of ['server', 'extension']) {
-    const [packed] = JSON.parse(await npm('pack', '--workspace', `@pi-superagent/${name}`, '--pack-destination', tarballs, '--json'))
+    const [packed] = JSON.parse(await npm('pack', '--workspace', `packages/${name}`, '--pack-destination', tarballs, '--json'))
     assert(packed.files.some(f => f.path === 'dist/index.js')); assert(packed.files.some(f => f.path === 'LICENSE'))
     assert(!packed.files.some(f => /(^|\/)(upstream|node_modules|admin.token|state.sqlite)/.test(f.path)))
     if (name === 'server') { for (const file of ['web/index.html', 'dist/pi-child.js', 'dist/remote-child.js', 'dist/remote-control.js', 'dist/agent-tools.js', 'dist/supervision.js', 'dist/supervision-config.js', 'dist/supervised-child.js', 'dist/backup.js', 'dist/backup-files.js', 'dist/backup-database.js', 'dist/backup-git.js', 'dist/instance-files.js']) assert(packed.files.some(f => f.path === file)) }
@@ -35,7 +35,7 @@ try {
   writeFileSync(join(pluginOnly, 'package.json'), '{"private":true,"type":"module"}\n')
   await install(pluginOnly, [paths[1]])
   const pluginLock = JSON.parse(readFileSync(join(pluginOnly, 'package-lock.json'), 'utf8'))
-  assert.deepEqual(Object.keys(pluginLock.packages).sort(), ['', 'node_modules/@pi-superagent/extension'])
+  assert.deepEqual(Object.keys(pluginLock.packages).sort(), ['', 'node_modules/@nemotte/pi-superagent-extension'])
   if (process.argv.includes('--audit')) await audit(pluginOnly, 'Plugin-only tarball')
   await install(clean, paths)
   // Inspect the consumer tree, not only workspace pins or the upstream manifest.
@@ -50,10 +50,10 @@ try {
   visit(tree.dependencies)
   for (const [name, version] of [['@earendil-works/pi-coding-agent', '1.5.0'], ['@earendil-works/pi-tui', '1.5.0'], ['minimatch', '11.0.3'], ['undici', '8.12.3']]) assert.deepEqual([...(versions.get(name) || [])], [version], name)
   if (process.argv.includes('--audit')) await audit(clean, 'Server + plugin tarballs')
-  const cli = join(clean, 'node_modules', '@pi-superagent', 'server', 'dist', 'cli.js')
+  const cli = join(clean, 'node_modules', '@nemotte', 'pi-superagent', 'dist', 'cli.js')
   assert.equal(await command(process.execPath, [cli, '--version'], clean), '0.1.0-alpha.1')
   if (process.platform === 'linux') {
-    const bridge = spawn(process.execPath, [join(clean, 'node_modules/@pi-superagent/server/dist/remote-child.js')], { cwd: clean, stdio: ['pipe', 'pipe', 'ignore'] })
+    const bridge = spawn(process.execPath, [join(clean, 'node_modules/@nemotte/pi-superagent/dist/remote-child.js')], { cwd: clean, stdio: ['pipe', 'pipe', 'ignore'] })
     let output = ''
     const result = new Promise((resolve, reject) => {
       const timer = setTimeout(() => { bridge.kill(); reject(Error('Installed SSH bridge timed out')) }, 10000)
@@ -105,7 +105,7 @@ try {
   await assert.rejects(command(process.execPath, [cli, 'serve', '--state-dir', backup], clean), /BACKUP_SNAPSHOT_NOT_INSTANCE/)
   await assert.rejects(run('restore', backup, '--expected-instance-id', inspectedBackup.instanceId, '--yes'), /BACKUP_EXISTS/)
   // Run the actual installed wizard, CLI, authentication IPC and SDK API-key login offline.
-  const extensionDir = join(clean, 'node_modules', '@pi-superagent', 'extension', 'dist')
+  const extensionDir = join(clean, 'node_modules', '@nemotte', 'pi-superagent-extension', 'dist')
   const { setup } = await import(pathToFileURL(join(extensionDir, 'setup.js')).href)
   const { localSetupServices } = await import(pathToFileURL(join(extensionDir, 'setup-services.js')).href)
   const { instanceClient, connectionForProject } = await import(pathToFileURL(join(extensionDir, 'instances.js')).href)
