@@ -3,13 +3,13 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createServer } from 'node:net'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { realpathSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 const exec = promisify(execFile)
-const root = process.cwd(); const dir = mkdtempSync(join(tmpdir(), 'pi package 安装 ')); const tarballs = join(dir, 'tarballs'); const clean = join(dir, 'clean')
+const root = process.cwd(); const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'pi package 安装 '))); const tarballs = join(dir, 'tarballs'); const clean = join(dir, 'clean')
 let child, url, token, setupClient, failureLog = ''
 async function command(file, args, cwd = root, extraEnv = {}) { return (await exec(file, args, { cwd, timeout: 120000, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, ...extraEnv, GIT_AUTHOR_NAME: 'Package Smoke', GIT_AUTHOR_EMAIL: 'package@example.com', GIT_COMMITTER_NAME: 'Package Smoke', GIT_COMMITTER_EMAIL: 'package@example.com' } })).stdout.trim() }
 const npm = (...args) => { if (!process.env.npm_execpath) throw Error('Run npm run test:package'); return command(process.execPath, [process.env.npm_execpath, ...args]) }
