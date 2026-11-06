@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { tmpdir, hostname, userInfo } from 'node:os'
 import { spawn } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
-import { randomInt, randomUUID, createHash } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { createServer } from 'node:net'
 import { DatabaseSync } from 'node:sqlite'
 import { initialize, readConfig } from '../src/config.js'
@@ -24,10 +24,17 @@ function reseal(path: string, data: any) {
   writeFileSync(path, JSON.stringify({ ...data, checksum: createHash('sha256').update(JSON.stringify(data)).digest('hex') }))
 }
 const driver = { send: async () => {}, stop: async () => {}, close: async () => {} }
+async function availablePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  const port = (server.address() as { port: number }).port
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  return port
+}
 async function fixture() {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sa backup 中文 '))); dirs.push(root)
   const repo = join(root, 'repo'), state = join(root, 'state'), backups = join(root, 'backups'); mkdirSync(backups); repository(repo)
-  const config = initialize(state, { repository: repo, port: randomInt(20000, 30000), paused: true, management: 'token' })
+  const config = initialize(state, { repository: repo, port: await availablePort(), paused: true, management: 'token' })
   const runtime = new Runtime(state, driver); runtime.submit({ id: 'durable', text: 'Keep the accepted request' }); await runtime.close()
   writeFileSync(join(state, 'agent', 'auth.json'), JSON.stringify({ provider: { key: 'fixture-private-key' } }), { mode: 0o600 })
   return { root, repo, state, backups, config, backup: join(backups, 'one'), expectedId: config.instanceId }
@@ -136,7 +143,7 @@ it('rejects changed payload, unknown schema, extra files and path traversal with
 })
 it('rejects a source repository inside the instance because original-path recovery needs it independently', async () => {
   const m = await load(), f = await fixture(), state = join(f.root, 'enclosing-state'), repo = join(state, 'source')
-  repository(repo); initialize(state, { repository: repo, paused: true, port: randomInt(20000, 30000) })
+  repository(repo); initialize(state, { repository: repo, paused: true, port: await availablePort() })
   await expect(m.createBackup(state, join(f.backups, 'enclosing'))).rejects.toThrow(/PATH/)
   expect(existsSync(join(f.backups, 'enclosing'))).toBe(false)
 })
@@ -161,7 +168,7 @@ it('preserves uncommitted work and checks external worktree administration rathe
 it('restores nested workspace files, persisted baselines and staged child changes without rewriting repository metadata', async () => {
   const m = await load(), f = await fixture(), app = join(f.root, 'app'); mkdirSync(app)
   const { members } = nestedWorkspace(app), state = join(f.root, 'workspace-state'), backup = join(f.backups, 'workspace')
-  const config = initialize(state, { repository: app, workspace: { repositories: members }, paused: true, port: randomInt(20000, 30000) })
+  const config = initialize(state, { repository: app, workspace: { repositories: members }, paused: true, port: await availablePort() })
   const snapshot = await captureWorkspace(app, config.workspace!), work = join(state, 'work', 'nested-task')
   await prepareWorkspace(snapshot, work, 'nested-task')
   writeFileSync(join(work, 'frontends/portal/README.md'), 'frontend task change')

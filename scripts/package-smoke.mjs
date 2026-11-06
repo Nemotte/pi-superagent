@@ -11,7 +11,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 const exec = promisify(execFile)
 const root = process.cwd(); const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'pi package 安装 '))); const tarballs = join(dir, 'tarballs'); const clean = join(dir, 'clean')
 let child, url, token, setupClient, failureLog = ''
-async function command(file, args, cwd = root, extraEnv = {}) { return (await exec(file, args, { cwd, timeout: 120000, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, ...extraEnv, GIT_AUTHOR_NAME: 'Package Smoke', GIT_AUTHOR_EMAIL: 'package@example.com', GIT_COMMITTER_NAME: 'Package Smoke', GIT_COMMITTER_EMAIL: 'package@example.com' } })).stdout.trim() }
+async function command(file, args, cwd = root, extraEnv = {}, timeout = 120000) { return (await exec(file, args, { cwd, timeout, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, ...extraEnv, GIT_AUTHOR_NAME: 'Package Smoke', GIT_AUTHOR_EMAIL: 'package@example.com', GIT_COMMITTER_NAME: 'Package Smoke', GIT_COMMITTER_EMAIL: 'package@example.com' } })).stdout.trim() }
 const npm = (...args) => { if (!process.env.npm_execpath) throw Error('Run npm run test:package'); return command(process.execPath, [process.env.npm_execpath, ...args]) }
 try {
   mkdirSync(tarballs); mkdirSync(clean); writeFileSync(join(clean, 'package.json'), '{"private":true,"type":"module"}\n')
@@ -24,7 +24,7 @@ try {
     else for (const file of ['dist/ssh.js', 'dist/remote.js', 'dist/remote-connections.js', 'dist/service-ui.js']) assert(packed.files.some(f => f.path === file))
     paths.push(join(tarballs, packed.filename))
   }
-  const install = (cwd, packages) => command(process.execPath, [process.env.npm_execpath, 'install', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', ...packages], cwd)
+  const install = (cwd, packages) => command(process.execPath, [process.env.npm_execpath, 'install', '--prefix', cwd, '--workspaces=false', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org', ...packages], cwd, {}, 240000)
   const audit = async (cwd, label) => {
     const report = JSON.parse(await command(process.execPath, [process.env.npm_execpath, 'audit', '--omit=dev', '--json', '--registry=https://registry.npmjs.org'], cwd))
     assert.equal(report.metadata.vulnerabilities.total, 0, `${label} production audit`)
