@@ -102,5 +102,6 @@ jobs:
         with:
           name: stability-${{ matrix.os }}
           path: .artifacts/stability-*/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
