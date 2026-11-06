@@ -6,6 +6,8 @@ export function git(cwd: string, ...args: string[]): string {
 }
 export function repository(path: string, files: Record<string, string> = { 'README.md': 'initial\n' }): string {
   mkdirSync(path, { recursive: true }); git(path, 'init')
+  git(path, 'config', 'core.autocrlf', 'false')
+  git(path, 'config', 'core.eol', 'lf')
   for (const [name, text] of Object.entries(files)) { mkdirSync(join(path, name, '..'), { recursive: true }); writeFileSync(join(path, name), text) }
   git(path, 'add', '.'); git(path, 'commit', '-m', 'initial'); return git(path, 'rev-parse', 'HEAD')
 }

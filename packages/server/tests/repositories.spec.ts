@@ -12,7 +12,7 @@ function fixture() { const root = realpathSync.native(mkdtempSync(join(tmpdir(),
 it('does not lazily fetch missing objects from a partial clone during host Git checks', async () => {
   const f = fixture(), partial = join(f.root, 'partial')
   git(f.front, 'config', 'uploadpack.allowFilter', 'true')
-  const clone = spawnSync('git', ['-C', f.root, '-c', 'protocol.file.allow=always', 'clone', '--filter=blob:none', '--no-checkout', pathToFileURL(f.front).href, partial], { encoding: 'utf8' })
+  const clone = spawnSync('git', ['-C', f.root, '-c', 'protocol.file.allow=always', 'clone', '--upload-pack=git -c uploadpack.allowFilter=true upload-pack', '--filter=blob:none', '--no-checkout', pathToFileURL(f.front).href, partial], { encoding: 'utf8' })
   expect(clone.status, clone.stderr).toBe(0)
   const blob = git(f.front, 'rev-parse', 'HEAD:README.md'), packs = join(partial, '.git', 'objects', 'pack')
   expect(await mod.repositoryGit(partial, 'rev-list', '--objects', '--missing=print', 'HEAD'), `${git(f.root, '--version')}\n${clone.stderr}`).toContain('?' + blob)
