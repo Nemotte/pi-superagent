@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pi Super-agent</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body>
+<header><div><span class="mark">π</span><strong>Pi Super-agent</strong><span class="badge">ALPHA</span></div><span id="connection">连接中…</span></header>
+<main>
+<section id="login" hidden>
+  <h1>连接你的工作站</h1><p>在 Pi 中运行 <code>/superagent web</code> 打开控制台。</p>
+  <details><summary>使用管理员令牌登录</summary><p>在 Pi 中运行 <code>/superagent token</code>，在私密面板中查看或复制管理员令牌。</p></details>
+  <form id="login-form"><label>管理员令牌<input id="token" type="password" autocomplete="current-password" required></label><button>登录</button></form>
+</section>
+<section id="workspace" hidden>
+  <div class="heading"><div><h1>应用监督台</h1><p id="instance"></p></div><div><button id="pause" class="secondary">暂停派单</button><button id="logout" class="secondary">退出登录</button></div></div>
+  <form id="global-search" class="filters"><input id="global-query" aria-label="搜索输入、会话或工单" maxlength="200" placeholder="搜索需求、工单、ID 或原讨论链接"><button class="secondary">搜索</button></form>
+  <section id="search-results" aria-live="polite"></section>
+  <nav aria-label="主导航">
+    <button data-tab="attention">总览</button><button data-tab="sources">来源</button>
+    <button data-tab="records" data-kind="triggers">输入</button><button data-tab="records" data-kind="decisions">评估</button>
+    <button data-tab="tickets">执行</button><button data-tab="config">设置</button><button data-tab="repos">工作区</button>
+  </nav>
+  <div id="attention-view">
+    <section id="readiness" class="card" role="status"></section>
+    <h2>待我处理</h2><section id="attention" aria-live="polite"></section>
+    <h2>运行概况</h2><div id="stats" class="stats"></div>
+    <details><summary>高级诊断</summary><button data-tab="events" class="secondary">查看原始事件</button></details>
+  </div>
+  <div id="tickets-view" hidden>
+    <form id="submit-form" class="card">
+      <p id="request-readiness" role="status">正在检查派单状态…</p>
+      <label>提出需求<textarea id="request" placeholder="描述目标、约束与验收条件…" required maxlength="20000"></textarea></label>
+      <button type="submit">提交给 Router</button><p id="request-feedback" role="status"></p><button id="request-records" type="button" class="secondary">查看已提交请求</button>
+    </form>
+    <form id="ticket-filter" class="filters"><input id="ticket-query" aria-label="搜索工单" placeholder="搜索标题或 ID"><select id="ticket-state" aria-label="工单状态"><option value="all">全部状态</option><option value="open">未结束</option><option value="ended">已结束</option></select><button class="secondary">筛选</button></form>
+    <div class="paging"><button id="previous" class="secondary">上一页</button><span id="page-number">1</span><button id="next" class="secondary">下一页</button></div>
+    <div class="split"><section id="tickets" aria-label="工单列表"></section><section id="detail" class="card"><p>选择工单查看详情。</p></section></div>
+  </div>
+  <div id="events-view" hidden><h2>原始运行事件</h2><pre id="events" class="card"></pre></div>
+  <div id="records-view" hidden>
+    <section id="thread-detail"></section>
+    <label>查看<select id="record-kind"><option value="triggers">输入 / Trigger</option><option value="decisions">评估 / Decision</option><option value="threads">会话 / Thread</option></select></label>
+    <div class="paging"><button id="record-previous" class="secondary">上一页</button><span id="record-page">1</span><button id="record-next" class="secondary">下一页</button></div>
+    <section id="record-cards"></section><details><summary>原始记录 / 审计</summary><pre id="records" class="card"></pre></details>
+  </div>
+  <div id="repos-view" hidden><h2>应用工作区</h2><p>一个需求统一协调，按仓库保留修改和验证结果。成员与根目录在实例创建时固定。</p><section id="repository-members" class="card"></section></div>
+  <div id="sources-view" hidden>
+    <section class="card"><h2>本地需求</h2><p>通过 Pi 或“执行”页提需求，在工单里查看回复和回答问题。无需 GitHub 账号或凭据。</p><p>代码在 GitLab、公司内网或其他 Git 服务：使用本机 checkout 即可；本地任务在隔离 worktree 执行。GitLab Issue / MR 自动接收与回复尚未接入。</p><button id="local-request" class="secondary">提出本地需求</button></section>
+    <p id="workspace-source-notice" hidden>此工作区使用本地派单；多仓库 GitHub 来源与 PR 发布尚未接入。</p>
+    <details id="github-settings"><summary>GitHub 来源（可选）</summary>
+      <p>允许名单内的真人在 Issue、PR 或评论中 @ 机器账号发起请求；结果回复到原讨论。代码的 Git 远端与需求渠道分别配置。</p>
+      <p>专用机器账户凭证放在实例的 <code>github.token</code> 或服务环境变量 <code>PI_SUPERAGENT_GITHUB_TOKEN</code>，不填入此表单。</p>
+      <form id="github-form" class="card">
+        <label class="check"><input id="github-enabled" type="checkbox">启用 GitHub</label>
+        <label>仓库 owner/repository<input id="github-repository" required></label><label>机器人账号<input id="github-bot" required></label>
+        <label>允许发起明确请求的账号（逗号分隔）<input id="github-allowed"></label><label>允许参与推断的机器人（逗号分隔）<input id="github-bots"></label>
+        <label>轮询间隔 / 秒<input id="github-interval" type="number" min="60" max="3600" value="60" required></label>
+        <fieldset><legend>接收未提及机器人的事件（仍由策略评估）</legend><label class="check"><input id="observe-issues" type="checkbox">Issue</label><label class="check"><input id="observe-pulls" type="checkbox">PR</label><label class="check"><input id="observe-comments" type="checkbox">评论 / Review</label><label class="check"><input id="observe-ci" type="checkbox">默认分支 CI</label></fieldset>
+        <button>保存 GitHub 配置</button>
+      </form><p id="source-notice" role="status"></p><button id="github-poll" class="secondary">立即轮询</button>
+    </details>
+    <h2>来源状态</h2><section id="source-status"></section><details><summary>来源诊断</summary><pre id="source-health" class="card"></pre><p>飞书已延期。</p></details>
+  </div>
+  <div id="config-view" hidden>
+    <h2>设置</h2><p>凭据与型号分开管理。需要选择账号支持的型号或登录时，在本项目的 Pi 中运行 <code>/superagent models</code>。</p>
+    <form id="settings-form">
+      <fieldset><legend>执行与评估</legend><button id="load-models" type="button" class="secondary">加载型号目录</button><p id="model-catalog-notice" role="status">从实例的固定 SDK 读取目录，不发起模型请求。</p><datalist id="provider-options"></datalist><datalist id="router-model-options"></datalist><datalist id="worker-model-options"></datalist><div class="model-grid">
+        <label>Router 提供商<input id="router-provider" list="provider-options" maxlength="120" placeholder="例如 openai"></label><label>Router 型号<input id="router-model" list="router-model-options" maxlength="200"></label>
+        <label>Worker 提供商<input id="worker-provider" list="provider-options" maxlength="120" placeholder="例如 openai"></label><label>Worker 型号<input id="worker-model" list="worker-model-options" maxlength="200"></label>
+      </div><label>最大并行 Worker<input id="max-workers" type="number" min="1" max="16" required></label>
+      <label>主动接单模式<select id="accept-mode"><option value="off">仅响应明确请求（off）</option><option value="observe">观察并记录建议（observe）</option><option value="auto">按授权规则主动执行（auto）</option></select></label>
+      <p>保存型号不会验证模型调用、重启已有 Agent 或恢复派单。</p></fieldset>
+      <fieldset><legend>团队书面约定</legend><label>沟通方式<textarea id="team-communication" maxlength="8000"></textarea></label><label>范围与协作<textarea id="team-scope" maxlength="8000"></textarea></label><label>交付要求<textarea id="team-delivery" maxlength="8000"></textarea></label></fieldset>
+      <fieldset><legend>主动评估规则</legend><div id="rule-rows"></div><button id="add-rule" type="button" class="secondary">添加规则</button></fieldset>
+      <div class="save-bar"><button id="settings-save" type="submit">保存设置</button><button id="settings-reload" type="button" class="secondary">放弃草稿，加载最新</button><p id="settings-notice" role="status"></p></div><p id="team-notice" hidden></p>
+    </form>
+    <button id="settings-history" class="secondary">查看保存历史</button><section id="config-history"></section>
+    <details><summary>完整配置（高级）</summary><p>保留给诊断和高级准入设置。普通模型、并发、规则和团队约定使用上面的表单。</p><form id="config-form"><label>实例设置<textarea id="config" rows="24" spellcheck="false"></textarea></label><button>保存完整配置</button></form></details>
+  </div>
+</section><p id="error" role="alert"></p>
+</main><footer>一个应用 · 一个协调实例 · 持久运行</footer>
+</body></html>

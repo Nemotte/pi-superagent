@@ -1,0 +1,15 @@
+{
+  "name": "@pi-superagent/extension",
+  "version": "0.1.0-alpha.1",
+  "description": "Pi control surface for local and SSH-hosted Super-agent services",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./dist/index.js"] },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "devDependencies": { "@earendil-works/pi-coding-agent": "1.5.0", "@earendil-works/pi-tui": "1.5.0", "typebox": "1.3.27" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "^1.5.0", "@earendil-works/pi-tui": "^1.5.0", "typebox": "^1.3.27" },
+  "peerDependenciesMeta": { "@earendil-works/pi-coding-agent": { "optional": true }, "@earendil-works/pi-tui": { "optional": true }, "typebox": { "optional": true } }
+}

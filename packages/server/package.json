@@ -1,0 +1,18 @@
+{
+  "name": "@pi-superagent/server",
+  "version": "0.1.0-alpha.1",
+  "description": "Persistent local or SSH-hosted application workspace agent service powered by Pi",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "bin": { "pi-superagent": "dist/cli.js" },
+  "exports": { ".": "./dist/index.js", "./bootstrap": "./dist/bootstrap.js" },
+  "files": ["dist", "web", "LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"],
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "proper-lockfile": "4.1.2",
+    "typebox": "1.3.27",
+    "zod": "4.6.7"
+  }
+}
