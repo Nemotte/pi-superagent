@@ -165,7 +165,8 @@ it('preserves uncommitted work and checks external worktree administration rathe
   await expect(m.checkBackup(f.backup)).rejects.toThrow(/GIT_CHANGED/)
   expect(git(work, 'diff', '--cached')).toContain('new index')
 })
-it('restores nested workspace files, persisted baselines and staged child changes without rewriting repository metadata', async () => {
+// Real multi-repository Git + SQLite backup/restore exceeds 15s on native Windows runners.
+it('restores nested workspace files, persisted baselines and staged child changes without rewriting repository metadata', { timeout: 60000 }, async () => {
   const m = await load(), f = await fixture(), app = join(f.root, 'app'); mkdirSync(app)
   const { members } = nestedWorkspace(app), state = join(f.root, 'workspace-state'), backup = join(f.backups, 'workspace')
   const config = initialize(state, { repository: app, workspace: { repositories: members }, paused: true, port: await availablePort() })
