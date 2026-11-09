@@ -75,9 +75,9 @@ export class ContextReader {
     }
     const threadAllowed = (key: string) => !own || store.threads.get(key)?.subscriptions.includes(own.id) || store.triggers.get(own.origin.triggerId)?.threads.some(ref => threadKey(ref) === key)
     if (r.kind === 'workspace') {
-      if (own && r.id && r.id !== own.id) throw Error('Workspace outside own ticket')
+      if (own && r.id !== undefined && r.id !== own.id) throw Error('Workspace outside own ticket')
       if (!this.host.workspace) throw Error('Workspace context unavailable')
-      const { repositories, ...metadata } = await this.host.workspace(own?.id || r.id)
+      const { repositories, ...metadata } = await this.host.workspace(own ? own.id : r.id)
       const { report, ...card } = metadata
       return { ...card, ...(report ? { report: clip(JSON.stringify(report), 600) } : {}), ...listPage(repositories.map(item => {
         const row = item as Record<string, unknown>
@@ -85,7 +85,7 @@ export class ContextReader {
       }), r.offset, r.limit) }
     }
     if (r.kind === 'instructions') {
-      if (own && r.id && r.id !== own.id) throw Error('Instructions outside own ticket')
+      if (own && r.id !== undefined && r.id !== own.id) throw Error('Instructions outside own ticket')
       const t = own || (r.id ? store.tickets.get(r.id) : undefined)
       if (r.id && !t) throw Error('Unknown ticket')
       return instructionContext(config, revision, t)

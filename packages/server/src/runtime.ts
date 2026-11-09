@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs'
 import { lockSync } from 'proper-lockfile'
 import { z } from 'zod'
 import { Engine, latestAssignment, latestReport, liveTicket, type AssessmentOutcome, type OutboundMessage, type Policy, type Ticket, type Trigger } from './core/index.js'
-import { ConfigSchema, readConfig, type Config } from './config.js'
+import { ConfigSchema, instanceLockPath, readConfig, type Config } from './config.js'
 import { Store, type Effect } from './store.js'
 import { prepareWorktree } from './workspace.js'
 import { captureWorkspace, prepareWorkspace, workspaceStatus, type WorkspaceSnapshot } from './multi-workspace.js'
@@ -31,6 +31,8 @@ const RouteSchema = z.discriminatedUnion('kind', [
 ])
 const ReportSchema = z.object({ state: z.enum(['progress', 'waiting', 'ready', 'blocked', 'failed', 'dropped']), summary: z.string().min(1).max(8000), question: z.string().min(1).max(1000).nullable().optional(), askedBy: z.string().optional(), answers: z.string().optional(), repositories: z.array(z.object({ id: z.string().max(64), summary: z.string().min(1).max(1500), checks: z.array(z.string().max(500)).max(10) }).strict()).max(32).optional() }).strict()
 class Deferred extends Error {}
+/** An execution change waits for in-flight work only so long; the ticket's worker is stopped regardless. */
+const EXECUTION_CHANGE_DRAIN_MS = 5000
 type Receipt = OutboundMessage & { status: 'pending' | 'sent' | 'dropped' }
 
 /** Owns the database, effects and domain; all model tool requests are authorized here. */
@@ -47,12 +49,15 @@ export class Runtime {
   private executionChange?: Promise<void>
   private existingExecution(id: string) { return this.store.get<ExistingExecution>(`existing-execution:${id}`) }
   private releaseExisting(id: string) { const release = this.existingLocks.get(id); if (release) { this.existingLocks.delete(id); release() } }
+  /** The original-checkout lease is per ticket; acquire idempotently, never twice. */
+  private holdExisting(id: string, existing: ExistingExecution): void { if (!this.existingLocks.has(id)) this.existingLocks.set(id, lockExistingExecution(existing)) }
   private timer?: ReturnType<typeof setInterval>
   private closing = false
   private closePromise?: Promise<void>
   constructor(readonly stateDir: string, private readonly driver: AgentDriver, private readonly options: { prepare?: typeof prepareWorktree; githubClient?: GitHubClientFactory; now?: () => number } = {}) {
     const initial = readConfig(stateDir)
-    this.unlock = lockSync(stateDir, { stale: 30000 })
+    // proper-lockfile writes `<path>.lock` for `stateDir`; pin the target explicitly so every lock user agrees on it.
+    this.unlock = lockSync(stateDir, { stale: 30000, lockfilePath: instanceLockPath(stateDir) })
     let opened: Store | undefined
     try {
       this.store = opened = new Store(join(stateDir, 'state.sqlite'))
@@ -84,7 +89,22 @@ export class Runtime {
         else if (a?.state === 'pending') this.store.enqueue('launch', a.id, { ticketId: ticket.id, assignmentId: a.id })
       }
       for (const thread of this.store.threads.active()) if (thread.evaluating) this.store.enqueue('assessment', thread.evaluating.id, { triggerId: thread.evaluating.triggerIds[0] })
+      this.recoverExistingLeases()
     } catch (error) { opened?.close(); this.unlock(); throw error }
+  }
+  /**
+   * Re-take the original-checkout lease of tickets that were mid-execution when the process stopped. A reboot drops the
+   * lock files together with the dead process table, so anything recorded here is either stale or unreachable by this
+   * PID; a live peer instance's lock stays visible and is left alone, and its `launch` effect retries.
+   */
+  private recoverExistingLeases(): void {
+    for (const ticket of this.store.tickets.open()) {
+      const existing = this.existingExecution(ticket.id)
+      if (!existing || this.existingLocks.has(ticket.id)) continue
+      const assignment = latestAssignment(ticket)
+      if (!assignment || !['running', 'pending'].includes(assignment.state)) continue
+      try { this.existingLocks.set(ticket.id, lockExistingExecution(existing)) } catch { /* a peer instance owns it; launch defers */ }
+    }
   }
   settings(): { config: Config; revision: number } {
     const value = this.store.get<{ config: unknown; revision: number }>('settings')!
@@ -167,7 +187,9 @@ export class Runtime {
     this.executionChange = new Promise<void>(resolve => { finish = resolve })
     let release: (() => void) | undefined
     try {
-      await Promise.allSettled([...this.running.values()])
+      // Dispatch is paused: running effects settle, and a GitHub call or reply that lingers must not hold this change open.
+      // Force-stopping the ticket's child below makes the rest of its work fail fast either way.
+      await Promise.race([Promise.allSettled([...this.running.values()]), new Promise<void>(resolve => setTimeout(resolve, EXECUTION_CHANGE_DRAIN_MS))])
       const plan = await this.executionPlan(ticketId)
       if (plan.planId !== request.planId) throw Error('Execution preview changed; review a fresh plan')
       release = lockExistingExecution(plan)
@@ -195,8 +217,14 @@ export class Runtime {
         }
         this.store.audit({ type: 'execution.changed', ticketId, mode: 'existing', root: plan.snapshot.root, branches: plan.branches, previous })
       })
+      // Publish the lease only now: `finally` below releases `release` unless the committed switch took it over.
       this.existingLocks.set(ticketId, release); release = undefined
       return { changed: true, mode: 'existing', root: plan.snapshot.root, paused: true }
+    } catch (error) {
+      // A committed switch publishes its lease after the transaction; anything else must not leave the lock behind.
+      const committed = this.existingExecution(ticketId)?.planId === request.planId
+      if (release && committed) { this.existingLocks.set(ticketId, release); release = undefined }
+      throw error
     } finally { try { release?.() } finally { this.changingExecution = false; finish(); this.executionChange = undefined } }
   }
   async workspaceView(ticketId?: string): Promise<{ repositories: unknown[]; [key: string]: unknown }> {
@@ -231,7 +259,7 @@ export class Runtime {
     if (this.closing || this.changingExecution) return
     this.engine.evaluateDue()
     const tasks: Promise<void>[] = [this.github.tick()]
-    for (const row of this.store.pendingEffects().filter(e => e.due <= Date.now()).slice(0, 100)) {
+    for (const row of this.store.dueEffects(Date.now())) {
       if (this.running.has(row.seq) || (this.settings().config.paused && row.kind !== 'stop')) continue
       const task = Promise.resolve().then(() => this.effect(row)).then(() => this.store.finishEffect(row)).catch(error => {
         if (this.closing) return
@@ -259,9 +287,15 @@ export class Runtime {
     if (!ticket || ticket.ended || latestAssignment(ticket)?.id !== target.assignmentId) throw Error('Stale or ended assignment')
     return ticket
   }
+  /**
+   * Claim a worker slot. An original-checkout ticket runs alone: its repository is shared with people and other tickets
+   * outside isolated worktrees, so no other worker may run while it does, and it waits while any other worker runs. A
+   * person's message may over-book the configured slot count by one, so a waiting person is not queued behind automation.
+   */
   private reserve(ticket: Ticket, human = false): void {
     if (this.busy.has(ticket.id)) return
-    if ([...this.existingLocks.keys()].some(id => id !== ticket.id) || this.existingExecution(ticket.id) && this.busy.size) throw new Deferred('Original workspace execution is exclusive')
+    const existing = !!this.existingExecution(ticket.id), others = this.busy.size - (existing ? 1 : 0)
+    if (existing ? others > 0 : [...this.existingLocks.keys()].some(id => id !== ticket.id)) throw new Deferred('Original workspace execution is exclusive')
     if (this.busy.size >= this.settings().config.maxWorkers + Number(human)) throw new Deferred('Worker slots full')
     this.busy.add(ticket.id)
   }
@@ -286,8 +320,16 @@ export class Runtime {
       this.store.set('router-started', true); this.engine.candidateDelivered(candidate.evalId); return
     }
     if (row.kind === 'stop') {
-      // Stop the process before a replacement Assignment can launch.
-      await this.driver.stop(`worker-${p.ticketId}`); this.busy.delete(p.ticketId!); this.releaseExisting(p.ticketId!); return
+      // Stop the process before a replacement Assignment can launch. A stop superseded by a newer assignment that never
+      // used this key must not terminate that new assignment's child.
+      const key = `worker-${p.ticketId}`
+      const latest = this.store.tickets.get(p.ticketId!) ? latestAssignment(this.store.tickets.get(p.ticketId!)!)?.id : undefined
+      if (!p.assignmentId || !latest || latest === p.assignmentId) await this.driver.stop(key)
+      this.busy.delete(p.ticketId!)
+      // The original-checkout lease belongs to the ticket: keep it while the ticket lives in existing mode, so nothing
+      // between the stop and the next launch can take the lock.
+      if (!this.existingExecution(p.ticketId!)) this.releaseExisting(p.ticketId!)
+      return
     }
     if (row.kind === 'reply') {
       const receipt = this.store.get<Receipt>(`reply:${row.key}`)
@@ -306,7 +348,7 @@ export class Runtime {
     }
     const ticket = p.ticketId && this.store.tickets.get(p.ticketId)
     if (!ticket || !liveTicket(ticket)) return
-    if (this.store.pendingEffects().some(e => e.kind === 'stop' && (e.payload as { ticketId: string }).ticketId === ticket.id)) throw new Deferred('Waiting for old assignment to stop')
+    if (this.store.pendingEffects().some(e => e.kind === 'stop' && (e.payload as { ticketId: string; assignmentId?: string }).ticketId === ticket.id && (e.payload as { assignmentId?: string }).assignmentId !== p.assignmentId)) throw new Deferred('Waiting for old assignment to stop')
     let target = this.target(ticket)
     if (row.kind === 'launch') {
       if (latestAssignment(ticket)?.id !== p.assignmentId) return
@@ -315,7 +357,7 @@ export class Runtime {
         const config = this.settings().config
         const existing = this.existingExecution(ticket.id)
         if (existing) {
-          if (!this.existingLocks.has(ticket.id)) this.existingLocks.set(ticket.id, lockExistingExecution(existing))
+          this.holdExisting(ticket.id, existing)
           await workspaceStatus(existing.snapshot, existing.snapshot.root, ticket.id, existing.branches)
         } else if (config.workspace) {
           let snapshot = this.store.get<WorkspaceSnapshot>(`workspace:${ticket.id}`)
@@ -335,7 +377,7 @@ export class Runtime {
       if (latestAssignment(ticket)?.state !== 'running' || this.store.pendingEffects().some(e => e.kind === 'launch' && (e.payload as { ticketId: string }).ticketId === ticket.id)) throw new Deferred('Waiting for assignment launch')
       const existing = this.existingExecution(ticket.id)
       if (existing) {
-        if (!this.existingLocks.has(ticket.id)) this.existingLocks.set(ticket.id, lockExistingExecution(existing))
+        this.holdExisting(ticket.id, existing)
         await workspaceStatus(existing.snapshot, existing.snapshot.root, ticket.id, existing.branches)
       }
       this.reserve(ticket, ticket.inputs.some(i => ticket.undelivered.includes(i.id) && i.kind === 'trigger' && i.human))

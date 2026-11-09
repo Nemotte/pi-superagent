@@ -1,13 +1,14 @@
 import * as fs from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { userInfo, hostname } from 'node:os'
 import { randomUUID, createHash } from 'node:crypto'
 import { lock } from 'proper-lockfile'
 import { z } from 'zod'
-import { ConfigSchema, type Config } from './config.js'
+import { ConfigSchema, supervisionLockPath, type Config } from './config.js'
 import { registeredService } from './supervision-config.js'
-import { serviceOperation } from './supervision.js'
+import { serviceEnvironment, serviceOperation } from './supervision.js'
 import { backupManifest, backingUp, restoring, assertInstanceDirectory } from './instance-files.js'
 import { BackupError, canonical, copyEntries, entrySchema, equal, samePayload, inside, json, limits, privateFile, scan, stat, validateEntries, validateInstanceEntries, syncDirectory, syncTree } from './backup-files.js'
 import { database } from './backup-database.js'
@@ -22,7 +23,7 @@ const account = () => { const value = userInfo(); return { name: value.username,
 const parentLock = (directory: string) => join(directory, '.pi-superagent-backup-control')
 async function acquire(path: string, stale = 120000) { try { return await lock(path, { realpath: false, stale }) } catch { throw new BackupError('BACKUP_BUSY') } }
 async function offline(state: string, port: number) {
-  const control = await acquire(state + '.supervision-control')
+  const control = await acquire(supervisionLockPath(state))
   let release: (() => Promise<void>) | undefined, server: ReturnType<typeof createServer> | undefined
   try {
     release = await acquire(state, 30000)
@@ -35,7 +36,7 @@ async function configAt(directory: string): Promise<Config> {
   const raw = await json(join(directory, 'config.json'), 1024 * 1024)
   try { if (!(raw as any)?.instanceId || (raw as any)?.schema !== 1) throw Error(); return ConfigSchema.parse(raw) } catch { throw new BackupError('BACKUP_SCHEMA') }
 }
-const summary = (m: Manifest) => ({ backupId: m.id, instanceId: m.instanceId, createdAt: m.createdAt, origin: m.origin, host: m.host, uid: m.uid, platform: m.platform, database: m.database, files: m.entries.length, bytes: m.entries.reduce((n, e) => n + (e.kind === 'file' ? e.size : 0), 0), credentialsIncluded: true })
+const summary = (m: Manifest) => ({ backupId: m.id, instanceId: m.instanceId, createdAt: m.createdAt, origin: m.origin, host: m.host, uid: m.uid, platform: m.platform, database: m.database, files: m.entries.length, bytes: m.entries.reduce((n, e) => n + (e.kind === 'file' ? e.size : 0), 0), credentialsMayBeIncluded: true })
 async function readSnapshot(directory: string, dependencies: boolean) {
   directory = await canonical(directory)
   const access = await stat(directory)
@@ -51,6 +52,8 @@ async function readSnapshot(directory: string, dependencies: boolean) {
   if (!samePayload(await scan(directory, [backupManifest], true), m.entries)) throw new BackupError('BACKUP_INTEGRITY')
   const config = await configAt(directory)
   if (config.instanceId !== m.instanceId || !equal(await database(directory, config), m.database)) throw new BackupError('BACKUP_IDENTITY')
+  // A machine-specific registration is never restored, so only a snapshot pinned to this Node would accept the unit.
+  if (await stat(join(directory, 'supervision.json'))) pinnedServiceEnvironment(directory)
   const gitFiles = m.entries.filter(e => e.path.startsWith('work/') && e.path.endsWith('/.git') && e.kind !== 'directory')
   if (gitFiles.length !== m.git.worktrees.length) throw new BackupError('BACKUP_FORMAT')
   for (const file of gitFiles) {
@@ -63,6 +66,21 @@ async function readSnapshot(directory: string, dependencies: boolean) {
   return { directory, m, config }
 }
 export async function checkBackup(directory: string) { const { m } = await readSnapshot(directory, true); return { ...summary(m), verified: true } }
+/**
+ * The restored `service.env.json` supplies the supervised unit's PATH, which carries the pinned Node binary. Device
+ * backups/restores already pin the host and OS account; a snapshot whose pinned Node no longer resolves to the running
+ * binary would restore into `assertSupervisedServe` failing for a reason a person diagnoses much later.
+ */
+function pinnedServiceEnvironment(stateDir: string): NodeJS.ProcessEnv {
+  const env = serviceEnvironment(stateDir)
+  const entry = Object.entries(env).find(([key]) => key.toUpperCase() === 'PATH')
+  const value = typeof entry?.[1] === 'string' ? entry[1] : ''
+  // Later PATH entries win, but Node is not necessarily last: any entry that resolves to the running binary counts.
+  const pinned = value.replace(/^"(.*)"$/, '$1').split(':').filter(Boolean)
+  const same = (path: string) => { try { return realpathSync(path) === realpathSync(process.execPath) } catch { return false } }
+  if (!pinned.some(entry => same(join(entry, basename(process.execPath))))) throw new BackupError('SERVICE_IDENTITY')
+  return env
+}
 /** Offline, original instance only. No changes to the source DB, Git metadata or service manager. */
 export async function createBackup(state: string, destination: string, options: { expectedId?: string } = {}) {
   state = await canonical(state); destination = await canonical(destination)

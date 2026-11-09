@@ -33,3 +33,22 @@ it('cancels a long-running process and rejects unknown jobs', async () => {
   await j.cancel(job.id); expect(j.status(job.id).state).toBe('cancelled')
   expect(() => j.status('missing')).toThrow(/Unknown/)
 })
+it('settles a cancelled job whose grandchild keeps the output pipes open', async () => {
+  // The worker prompt tells agents to use `/bin/sh -c`; a shell job leaves a grandchild holding stdout/stderr,
+  // so `close` may never fire for the direct child. Cancellation must still return and free the running slot.
+  const j = await jobs()
+  const job = j.start('/bin/sh', ['-c', 'sleep 30 & wait'])
+  const started = Date.now(); await j.cancel(job.id)
+  expect(Date.now() - started).toBeLessThan(6000)
+  expect(j.running).toBe(0); expect(j.status(job.id).state).toBe('cancelled')
+  // A freed slot accepts the next job, which is what `report ready` waits for.
+  const next = await settled(j, j.start(process.execPath, ['-e', 'process.exit(0)']).id)
+  expect(next.state).toBe('succeeded')
+})
+it('keeps cancelled duplicates idempotent and truncates output on a UTF-8 boundary', async () => {
+  const j = await jobs(); const job = j.start(process.execPath, ['-e', 'process.stdout.write("汉".repeat(20000)); setTimeout(()=>{}, 1000)'])
+  await sleep(150); await j.cancel(job.id); await j.cancel(job.id)
+  const output = j.status(job.id).output
+  expect(output.length).toBeLessThanOrEqual(32768); expect(output).not.toContain('\ufffd')
+  expect(Buffer.from(output, 'utf8').toString('utf8')).toBe(output)
+})

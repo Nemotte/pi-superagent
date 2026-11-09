@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { followupOwners, key, latestAssignment, ticketStage, type DomainEvent, type Ticket, type Trigger, type WorkerReport } from './core/index.js'
 import type { Store } from './store.js'
 import { recordAttentionResponse } from './attention-response.js'
@@ -30,7 +31,8 @@ export function followupRelay(store: Store, triggerId: string): unknown | undefi
 }
 export function reportRelay(store: Store, ticket: Ticket, report: WorkerReport): string | undefined {
   if (report.state === 'progress' && !report.question && !report.answers) return
-  const id = key('report', ticket.id, latestAssignment(ticket)?.id || '', ticket.updatedAt, JSON.stringify(report))
+  // The report body is unbounded text; key on its digest so a long summary cannot bloat the receipt key.
+  const id = key('report', ticket.id, latestAssignment(ticket)?.id || '', ticket.updatedAt, createHash('sha256').update(JSON.stringify(report)).digest('hex'))
   store.set(`report:${id}`, { ticketId: ticket.id, report, at: ticket.updatedAt })
   store.enqueue('relay', id, { kind: report.question ? 'worker_attention' : 'worker_report', ticket: ticketCard(ticket), state: report.state,
     summary: clip(report.summary), ...(report.question ? { question: report.question, attentionId: ticket.attention?.id } : {}), ...(report.answers ? { answerTo: report.answers } : {}), read: { kind: 'report', id }, instructions: { kind: 'instructions', id: ticket.id } })

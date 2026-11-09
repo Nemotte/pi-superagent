@@ -4,7 +4,7 @@ import * as supervision from '../src/supervision.js'
 import { planService } from '../src/supervision-config.js'
 import { fileURLToPath } from 'node:url'
 import { existsSync, realpathSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, symlinkSync, statSync, chmodSync, linkSync, cpSync, readlinkSync, utimesSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir, hostname, userInfo } from 'node:os'
 import { spawn } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
@@ -201,6 +201,8 @@ it('requires disabled inactive supervision and never restores its machine-specif
   const m = await load(), f = await fixture(), home = join(f.root, 'home'); mkdirSync(home)
   const record = planService(f.state, { home, uid: process.getuid?.() ?? 0, platform: 'linux', node: process.execPath, cliPath: fileURLToPath(import.meta.url), run: async () => '' })
   writeFileSync(join(f.state, 'supervision.json'), JSON.stringify(record))
+  // Supervised instances carry a private environment whose PATH ends at the pinned Node; a restore checks it still matches.
+  writeFileSync(join(f.state, 'service.env.json'), JSON.stringify({ PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin` }), { mode: 0o600 })
   const status = vi.spyOn(supervision, 'serviceOperation').mockResolvedValue({ active: 'active', enabled: true })
   await expect(m.createBackup(f.state, f.backup)).rejects.toThrow(/SUPERVISION/)
   status.mockResolvedValue({ active: 'inactive', enabled: true }); await expect(m.createBackup(f.state, f.backup)).rejects.toThrow(/SUPERVISION/)
@@ -247,4 +249,12 @@ it('previews retention, keeps at least one verified snapshot, and never removes 
   expect((await m.pruneBackups(f.backups, f.state, { ...options, confirmed: true })).removed).toBe(1)
   expect(existsSync(join(unknown, 'precious'))).toBe(true); expect(existsSync(bad)).toBe(true); expect(existsSync(other)).toBe(true)
   expect([f.backup, second].filter(existsSync)).toHaveLength(1)
+})
+it('refuses a supervised snapshot whose pinned Node is not the binary that would run the restarted service', async () => {
+  const m = await load(), f = await fixture(), home = join(f.root, 'home'); mkdirSync(home)
+  writeFileSync(join(f.state, 'supervision.json'), JSON.stringify(planService(f.state, { home, uid: process.getuid?.() ?? 0, platform: 'linux', node: process.execPath, cliPath: fileURLToPath(import.meta.url), run: async () => '' })))
+  writeFileSync(join(f.state, 'service.env.json'), JSON.stringify({ PATH: '/nonexistent/bin:/usr/bin:/bin' }), { mode: 0o600 })
+  const status = vi.spyOn(supervision, 'serviceOperation').mockResolvedValue({ active: 'inactive', enabled: false })
+  await expect(m.createBackup(f.state, f.backup)).rejects.toThrow(/SERVICE_IDENTITY/)
+  expect(status).toHaveBeenCalled()
 })

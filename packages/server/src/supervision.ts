@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { createServer } from 'node:net'
 import { lockSync } from 'proper-lockfile'
-import { readConfig } from './config.js'
+import { readConfig, supervisionLockPath } from './config.js'
 import { hostIdentity, planService, registeredService, renderUnit, serviceEnvironment, ServiceError, verifyUnit, type Registration, type ServiceHost } from './supervision-config.js'
 export { registeredService, serviceEnvironment } from './supervision-config.js'
 const exec = promisify(execFile)
@@ -73,7 +73,7 @@ export async function serviceOperation(stateDir: string, action: string, options
   }
   if (action === 'status') return result()
   let release: () => void
-  try { release = lockSync(stateDir + '.supervision-control', { realpath: false, stale: 120000 }) } catch { throw new ServiceError('SERVICE_CONTROL_BUSY') }
+  try { release = lockSync(supervisionLockPath(stateDir), { realpath: false, stale: 120000 }) } catch { throw new ServiceError('SERVICE_CONTROL_BUSY') }
   let unlock: (() => void) | undefined
   try {
     if (readConfig(stateDir).instanceId !== r.instanceId) throw new ServiceError('SERVICE_IDENTITY')

@@ -1,8 +1,29 @@
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v)
+/** A list of records with a stable `id` (rules, workspace members) merges by identity instead of by position. */
+const identifiable = v => Array.isArray(v) && v.every(item => object(item) && typeof item.id === 'string')
+/** Merge records by `id`; an absent record means "not in this list", so both-sided additions with no base stay conflicts. */
+function mergeList(base, local, remote, path) {
+  const conflicts = [], result = [], ids = [...new Set([...base, ...local, ...remote].map(item => item.id))]
+  let divergent = false
+  for (const id of ids) {
+    const inBase = base.some(item => item.id === id), inLocal = local.some(item => item.id === id), inRemote = remote.some(item => item.id === id)
+    // A record added on both sides under different content has no shared ancestor to merge against.
+    if (!inBase && inLocal && inRemote) divergent ||= true
+    const merged = mergeDraft(base.find(item => item.id === id), local.find(item => item.id === id), remote.find(item => item.id === id), `${path}[${id}]`)
+    conflicts.push(...merged.conflicts)
+    if (merged.value !== undefined) result.push(merged.value)
+  }
+  if (divergent) conflicts.unshift(path)
+  // Local order first, then anything the other side added, so a person's list keeps the order they arranged.
+  const order = [...local, ...remote].map(item => item.id)
+  return { value: result.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)), conflicts }
+}
 export function mergeDraft(base, local, remote, path = '') {
   if (equal(local, base)) return { value: remote, conflicts: [] }
   if (equal(remote, base) || equal(local, remote)) return { value: local, conflicts: [] }
+  // An empty list has no identity to merge by; a concurrent creation without a shared ancestor stays a conflict.
+  if (identifiable(base) && identifiable(local) && identifiable(remote) && !(base.length === 0 && local.length && remote.length)) return mergeList(base, local, remote, path)
   if (object(base) && object(local) && object(remote)) {
     const value = {}, conflicts = []
     for (const key of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {

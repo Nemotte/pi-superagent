@@ -63,6 +63,7 @@ jobs:
           name: install-${{ matrix.os }}
           path: .artifacts/install.log
           retention-days: 7
+  # The published bundle is only as trustworthy as both gates: the full suite on Linux and the portable target matrix.
   verified-bundle:
     needs: [test, portable]
     runs-on: ubuntu-latest

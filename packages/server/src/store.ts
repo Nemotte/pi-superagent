@@ -24,6 +24,7 @@ export class Store implements Repositories {
           value TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL,
           error TEXT NOT NULL DEFAULT '', UNIQUE(kind, key));
           CREATE INDEX IF NOT EXISTS effect_due ON effect(due);
+          CREATE INDEX IF NOT EXISTS effect_due_kind ON effect(due, kind);
           CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, value TEXT NOT NULL);`)
         this.set('schema', 1)
       })
@@ -92,6 +93,10 @@ export class Store implements Repositories {
   }
   pendingEffects(): Effect[] {
     return this.db.prepare('SELECT * FROM effect ORDER BY seq').all().map(row => ({ ...row, payload: JSON.parse(String(row.value)) })) as unknown as Effect[]
+  }
+  /** The effects a scheduler tick may run: due now, in enqueue order, bounded so a backlog cannot starve the event loop. */
+  dueEffects(now: number, limit = 256): Effect[] {
+    return this.db.prepare('SELECT * FROM effect WHERE due<=? ORDER BY seq LIMIT ?').all(now, limit).map(row => ({ ...row, payload: JSON.parse(String(row.value)) })) as unknown as Effect[]
   }
   finishEffect(e: Effect): void { this.db.prepare('DELETE FROM effect WHERE seq=? AND generation=?').run(e.seq, e.generation) }
   deferEffect(e: Effect, delay = 1000): void { this.db.prepare('UPDATE effect SET due=? WHERE seq=? AND generation=?').run(Date.now() + delay, e.seq, e.generation) }

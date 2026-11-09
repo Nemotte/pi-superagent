@@ -20,10 +20,13 @@ function message(raw: z.infer<typeof CommentSchema>, number: number, kind: strin
   if (sameLogin(raw.user.login, config.botLogin)) return undefined
   const escaped = config.botLogin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const mention = new RegExp(`(?:^|[^a-zA-Z0-9_@])@${escaped}(?![a-zA-Z0-9_-])`, 'i').test(raw.body || '')
+  // Issues and PRs are identified by their number, so their body text is not part of the identity either; comments and
+  // reviews are identified by `at` plus text, and each edit is a new message a person may have to see.
   const at = raw.updated_at || raw.submitted_at || raw.created_at
   if (!at || !Number.isFinite(Date.parse(at))) throw Error('GitHub event has no valid timestamp')
   const isPr = ['pull', 'inline', 'review'].includes(kind) || /\/pull\//.test(raw.html_url || '')
-  return { id: key(`github-${kind}`, config.repository.toLowerCase(), String(raw.id), ['issue', 'pull'].includes(kind) ? '' : at, text), source: 'github',
+  const identity = ['issue', 'pull'].includes(kind) ? '' : at + '\u0000' + text
+  return { id: key(`github-${kind}`, config.repository.toLowerCase(), String(raw.id), identity), source: 'github',
     actor: { source: 'github', id: raw.user.login }, human: raw.user.type === 'User' && !/\[bot\]$/i.test(raw.user.login),
     threads: [{ source: 'github', id: String(number) }], at, text: text.slice(0, 60000), ...(mention ? { addressed: 'mention' } : {}),
     channel: { source: 'github', thread: `github:${number}`, address: { repository: config.repository, number: String(number), ...(kind === 'inline' ? { rootId: String(raw.in_reply_to_id || raw.id) } : {}) } },

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { canonical, instanceClient, instanceConfig, type Connection } from './instances.js'
@@ -25,8 +25,9 @@ async function portClosed(port: number): Promise<boolean> {
     socket.once('error', error => finish((error as NodeJS.ErrnoException).code === 'ECONNREFUSED'))
   })
 }
+/** Matches the server's canonical spelling: `state/.lock` is a different file from `state.lock`. */
 async function stopped(stateDir: string, port: number): Promise<boolean> {
-  return !existsSync(stateDir + '.lock') && await portClosed(port)
+  return !existsSync(resolve(stateDir) + '.lock') && await portClosed(port)
 }
 /** Human command only. Lifecycle ownership comes from a local binding, never a remote URL. */
 export async function restartService(ctx: ExtensionContext, connection: Connection, controls: Controls = {}): Promise<void> {

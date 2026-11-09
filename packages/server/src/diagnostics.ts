@@ -6,8 +6,14 @@ function files(directory: string, suffix: string) {
 }
 function tail(path: string, size: number, max: number): string {
   const fd = openSync(path, 'r')
-  try { const length = Math.min(size, max), data = Buffer.alloc(length); readSync(fd, data, 0, length, Math.max(0, size - length)); return data.toString('utf8') }
-  finally { closeSync(fd) }
+  try {
+    const length = Math.min(size, max), data = Buffer.alloc(length)
+    readSync(fd, data, 0, length, Math.max(0, size - length))
+    // A window that starts inside a multi-byte character must skip the sequence it cuts, so no U+FFFD reaches the reader.
+    let offset = 0
+    while (offset < data.length && (data[offset]! & 0xc0) === 0x80) offset++
+    return data.subarray(offset).toString('utf8')
+  } finally { closeSync(fd) }
 }
 /** Bounded, read-only diagnostics for an existing ticket. Never accepts a caller-supplied file path. */
 export function ticketDiagnostics(stateDir: string, ticketId: string) {

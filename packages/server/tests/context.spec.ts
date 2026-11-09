@@ -95,3 +95,14 @@ it('supplies matched rule text and team instructions, preserves revisions and up
   expect(h.runtime.store.get<any>(`settings:${before.revision}`).config.team.communication).toBe('Use one concise sentence.')
   expect(h.runtime.store.tickets.get(d.ticketId)?.inputs.some(i => i.kind === 'note' && i.text.includes('instructions'))).toBe(true)
 })
+it('rejects an empty ticket id for workspace and instructions reads from a worker', async () => {
+  const { ContextReader } = await import('../src/context.js')
+  const seen: Array<string | undefined> = []
+  const ticket = { id: 'ticket-a', origin: { triggerId: 't', triggerIds: ['t'] }, mandate: { basis: {}, scope: 's' }, inputs: [] } as any
+  const store: any = { tickets: { get: (id: string) => id === 'ticket-a' ? ticket : undefined }, threads: { get: () => undefined }, triggers: { get: () => undefined } }
+  const reader = new ContextReader({ store, settings: () => ({ config: { rules: [], team: {}, workspace: null }, revision: 1 }), candidate: () => undefined, github: async () => ({}), workspace: async (id?: string) => { seen.push(id); return { repositories: [] } } })
+  await expect(reader.read({ kind: 'workspace', id: '' }, ticket)).rejects.toThrow(/outside own ticket/)
+  await expect(reader.read({ kind: 'instructions', id: '' }, ticket)).rejects.toThrow(/outside own ticket/)
+  await expect(reader.read({ kind: 'workspace' }, ticket)).resolves.toBeDefined()
+  expect(seen).toEqual(['ticket-a'])
+})

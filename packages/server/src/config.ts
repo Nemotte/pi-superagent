@@ -27,16 +27,21 @@ export const ConfigSchema = z.object({
 }).strict().refine(c => !c.workspace || !c.github?.enabled, 'Workspace mode supports manual sources; multi-repository GitHub channels are not configured').refine(c => c.rules.reduce((n, r) => n + r.instruction.length, 0) + Object.values(c.team).join('').length <= 32000, 'Team instructions and rules exceed the 32000-character context budget')
 export type Config = z.infer<typeof ConfigSchema>
 export const defaultStateDir = () => process.env.PI_SUPERAGENT_HOME || join(homedir(), '.pi-superagent', 'default')
-export function initialize(stateDir: string, input: { repository: string; port?: number; paused?: boolean; maxWorkers?: number; workspace?: WorkspaceConfig | null; management?: ManagementMode }): Config {
-  const { config, management } = initialConfig(stateDir, input)
-  mkdirSync(dirname(resolve(stateDir)), { recursive: true, mode: 0o700 })
+/** The one lock file every process derives: runtime, supervision, backup and the clients that wait for a stop. */
+export const instanceLockPath = (stateDir: string): string => resolve(stateDir) + '.lock'
+export const supervisionLockPath = (stateDir: string): string => resolve(stateDir) + '.supervision-control'
+export function initialize(input: string, settings: { repository: string; port?: number; paused?: boolean; maxWorkers?: number; workspace?: WorkspaceConfig | null; management?: ManagementMode }): Config {
+  // One canonical spelling: `state/.lock` and `state.lock` are different files.
+  const stateDir = resolve(input)
+  const { config, management } = initialConfig(stateDir, settings)
+  mkdirSync(dirname(stateDir), { recursive: true, mode: 0o700 })
   let unlock: () => void
-  try { unlock = lockSync(stateDir + '.supervision-control', { realpath: false, stale: 120000 }) } catch { throw Error('INSTANCE_BUSY') }
+  try { unlock = lockSync(supervisionLockPath(stateDir), { realpath: false, stale: 120000 }) } catch { throw Error('INSTANCE_BUSY') }
   try { return initializeFiles(stateDir, config, management) } finally { unlock() }
 }
 function initialConfig(stateDir: string, input: Parameters<typeof initialize>[1]) {
   assertInstanceDirectory(stateDir)
-  if (lstatSync(stateDir + '.lock', { throwIfNoEntry: false })) throw Error('INSTANCE_BUSY')
+  if (lstatSync(instanceLockPath(stateDir), { throwIfNoEntry: false })) throw Error('INSTANCE_BUSY')
   const { management = 'local', ...settings } = input
   ManagementMode.parse(management)
   const config = ConfigSchema.parse({ ...settings, repository: resolve(input.repository) })
@@ -54,7 +59,7 @@ function initialConfig(stateDir: string, input: Parameters<typeof initialize>[1]
 }
 function initializeFiles(stateDir: string, config: Config, management: ManagementMode): Config {
   assertInstanceDirectory(stateDir)
-  if (lstatSync(stateDir + '.lock', { throwIfNoEntry: false })) throw Error('INSTANCE_BUSY')
+  if (lstatSync(instanceLockPath(stateDir), { throwIfNoEntry: false })) throw Error('INSTANCE_BUSY')
   mkdirSync(stateDir, { recursive: true, mode: 0o700 })
   if (existsSync(join(stateDir, 'config.json')) || existsSync(join(stateDir, 'admin.token'))) throw Error('Instance already initialized')
   writeFileSync(join(stateDir, 'config.json'), JSON.stringify(config, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
@@ -62,9 +67,9 @@ function initializeFiles(stateDir: string, config: Config, management: Managemen
   mkdirSync(join(stateDir, 'agent'), { recursive: true, mode: 0o700 })
   return config
 }
-export function readConfig(stateDir: string): Config { assertInstanceDirectory(stateDir); return ConfigSchema.parse(JSON.parse(readFileSync(join(stateDir, 'config.json'), 'utf8'))) }
-export function readToken(stateDir: string): string {
-  const token = readFileSync(join(stateDir, 'admin.token'), 'utf8').trim()
+export function readConfig(path: string): Config { const stateDir = resolve(path); assertInstanceDirectory(stateDir); return ConfigSchema.parse(JSON.parse(readFileSync(join(stateDir, 'config.json'), 'utf8'))) }
+export function readToken(path: string): string {
+  const token = readFileSync(join(resolve(path), 'admin.token'), 'utf8').trim()
   if (token.length < 32) throw Error('Invalid administrator token')
   return token
 }

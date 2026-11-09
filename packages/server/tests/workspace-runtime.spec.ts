@@ -136,3 +136,34 @@ it('keeps workspace membership immutable and restricts host reads to selected re
   expect(await f.runtime.tool(target, 'read', { kind: 'workspace' })).toMatchObject({ ticketId: ticket.id, total: 2 })
   await expect(f.runtime.tool(target, 'read', { kind: 'workspace', id: 'another-ticket' })).rejects.toThrow(/own ticket/i)
 })
+it('re-takes original-checkout leases for tickets that were running when the process stopped', { timeout: 60000 }, async () => {
+  const f = await fixture(), ticket = await accept(f)
+  for (const repo of [f.repos.front, f.repos.back, f.repos.child]) git(repo, 'switch', '-c', 'fix/lease')
+  const runtime = f.runtime as any
+  const plan = await runtime.executionPlan(ticket.id)
+  const paused = runtime.settings(); runtime.saveSettings({ ...paused.config, paused: true }, paused.revision)
+  await runtime.useExistingExecution(ticket.id, { confirmed: true, planId: plan.planId })
+  const resumed = runtime.settings(); runtime.saveSettings({ ...resumed.config, paused: false }, resumed.revision)
+  await runtime.tick()
+  // Simulate a crash: close without the orderly release, then reopen from the same state directory.
+  await f.runtime.close()
+  f.runtime = new Runtime(f.state, f.driver); resources.find(r => r.dir === f.dir)!.runtime = f.runtime
+  const { lockExistingExecution } = await import('../src/existing-execution.js')
+  // Recovery re-took the lease (the ticket was still mid-execution), so a second holder must be refused.
+  expect(() => lockExistingExecution(plan)).toThrow(/busy/)
+})
+it('does not let a superseded stop effect kill the replacement assignment', { timeout: 60000 }, async () => {
+  const f = await fixture(), ticket = await accept(f)
+  const stopped: string[] = []
+  ;(f.driver as any).stop = async (key: string) => { stopped.push(key) }
+  const first = ticket.assignments[0].id
+  await f.runtime.tick()
+  // A worker failure makes the ticket retryable; the retry queues start(new) and stop(old) together.
+  await f.runtime.tool(f.messages.filter((m: any) => m.target.role === 'worker').at(-1).target, 'report', { state: 'failed', summary: 'worker failed' })
+  f.runtime.engine.retryTicket(ticket.id)
+  await f.runtime.tick()
+  expect(f.runtime.store.pendingEffects().filter(e => e.kind === 'stop')).toHaveLength(0)
+  // The replacement assignment launched; the old stop must not have terminated its key.
+  expect(f.messages.some((m: any) => m.target.assignmentId !== first)).toBe(true)
+  expect(stopped).not.toContain(`worker-${ticket.id}`)
+})

@@ -4,6 +4,8 @@
 
 This is a single-administrator service running locally or on an SSH host. Workers execute tools with the service account's privileges. Use a dedicated account or isolated environment, provide narrowly scoped credentials, and restrict accessible files and network endpoints. The API binds only to 127.0.0.1; use an SSH tunnel for remote management.
 
+`GET /health` is the only unauthenticated API route and returns `{"status":"ok","protocol":1}` — no version, host name, ticket or configuration data. It exists so a supervisor or client can tell "port open" from "service ready"; everything else under `/api/v1/` requires a bearer token, a session cookie with a CSRF header, or the local-mode client header. Responses carry a strict CSP (`default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`), and only the files listed in the server's asset table are served from `web/`.
+
 Protect the instance directory and backups. POSIX file modes are set for sensitive files; Windows deployments also need an account-restricted directory ACL. Session histories and job output may contain repository data and secrets shown to the model.
 
 Verified offline snapshots contain credentials in plaintext; use encrypted storage for off-host copies. Snapshot format/checksums, SQLite integrity, paths, critical file types and Git dependencies are checked before restore. Restore requires the original absent path, host/account/profile and instance ID; it never starts the service or restores system supervision. External Git object stores/worktree administration need a separate matching backup. Retention is explicit, preview-first and limited to matching complete snapshots; no job/session/worktree pruning runs automatically. See [backup and upgrade operations](docs/backup.md).

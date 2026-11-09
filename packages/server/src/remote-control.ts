@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { createServer, createConnection } from 'node:net'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
-import { initialize, readConfig, readToken } from './config.js'
+import { initialize, instanceLockPath, readConfig, readToken } from './config.js'
 import { readManagement } from './management.js'
 import { InstanceClient } from './client.js'
 import { discoverWorkspace, repositoryMember, validateWorkspace, workspaceConfig } from './repositories.js'
@@ -92,7 +92,7 @@ export async function remoteOperation(input: unknown, signal?: AbortSignal): Pro
     catch (error) { if (error instanceof ServiceError) throw new RemoteError(error.code); throw error }
   }
   const check = () => { signal?.throwIfAborted(); remoteIdentity(canonicalState, r.expected) }
-  const stopped = async () => !existsSync(canonicalState + '.lock') && await portClosed(c.port)
+  const stopped = async () => !existsSync(instanceLockPath(canonicalState)) && await portClosed(c.port)
   check()
   if (registeredService(canonicalState)) {
     await runCli(canonicalState, ['--version'], signal); check()

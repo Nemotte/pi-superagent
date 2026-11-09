@@ -40,3 +40,21 @@ it('rejects startup exits instead of hanging forever', async () => {
   drivers.push(driver)
   await expect(driver.send({ role: 'router', key: 'router', agentDir }, { id: 'x', text: 'x' })).rejects.toThrow(/exit/i)
 })
+it('replaces a live child when a retry starts a new assignment instead of failing the launch', async () => {
+  const driver = new mod.PiDriver({ entry: new URL('./fixtures/agent.mjs', import.meta.url), tool: async () => {}, event: () => {} }); drivers.push(driver)
+  const first = { role: 'worker', key: 'worker-retry', ticketId: 'a', assignmentId: 'attempt-1', agentDir }
+  await driver.send(first, { id: 'one', text: 'one' })
+  // A retry is a new assignment on the same key; the host must not require a separate stop effect to land first.
+  await driver.send({ ...first, assignmentId: 'attempt-2' }, { id: 'two', text: 'two' })
+  expect(driver.size).toBe(1)
+  await driver.stop(first.key); expect(driver.size).toBe(0)
+})
+it('treats repeated and concurrent stops of one key as one termination', async () => {
+  const driver = new mod.PiDriver({ entry: new URL('./fixtures/agent.mjs', import.meta.url), tool: async () => {}, event: () => {} }); drivers.push(driver)
+  const target = { role: 'worker', key: 'worker-stop', ticketId: 'a', assignmentId: 'attempt-1', agentDir }
+  await driver.send(target, { id: 'one', text: 'one' })
+  await Promise.all([driver.stop(target.key), driver.stop(target.key), driver.stop(target.key)])
+  expect(driver.size).toBe(0)
+  await driver.stop(target.key) // idempotent after the child is gone
+  expect(driver.size).toBe(0)
+})

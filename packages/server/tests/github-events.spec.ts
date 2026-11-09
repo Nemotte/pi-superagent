@@ -9,7 +9,8 @@ it('normalizes issues and PRs with repository-scoped stable IDs and channels', (
   expect(event.channel.address).toMatchObject({ repository: 'owner/project', number: '3' })
   expect(mod.issueEvent({ ...base }, config).id).toBe(event.id)
   expect(mod.issueEvent({ ...base, updated_at: '2026-11-02T02:00:00Z' }, config).id).toBe(event.id)
-  expect(mod.issueEvent({ ...base, body: '@worker-bot updated request' }, config).id).not.toBe(event.id)
+  // The body is task data, not identity: an edit stays one request, and comment edits are covered separately below.
+  expect(mod.issueEvent({ ...base, body: '@worker-bot updated request' }, config).id).toBe(event.id)
   expect(mod.issueEvent(base, { ...config, repository: 'other/project' }).id).not.toBe(event.id)
   expect(mod.issueEvent({ ...base, pull_request: { url: 'https://api.github.com/repos/owner/project/pulls/3' } }, config).meta.isPr).toBe(true)
 })
@@ -27,4 +28,13 @@ it('keeps inline discussion roots and review decisions in normalized input', () 
   expect(event.channel.address.rootId).toBe('12'); expect(event.text).toContain('src/index.ts:4')
   const review = mod.commentEvent({ ...base, body: '', state: 'CHANGES_REQUESTED', submitted_at: base.created_at }, 3, 'review', config)
   expect(review.text).toContain('CHANGES_REQUESTED'); expect(review.meta.isPr).toBe(true)
+})
+it('treats an issue or PR body edit as the same message but a comment edit as new input', () => {
+  // An issue is identified by its number: an edit must not create a second, conflicting request for reviewers to reject.
+  expect(mod.issueEvent({ ...base, body: '@worker-bot completely different' }, config).id).toBe(mod.issueEvent(base, config).id)
+  // A comment carries its own identity, and an edited comment is a new message the poller must not drop.
+  const comment = { ...base, created_at: '2026-11-02T01:00:00Z', updated_at: '2026-11-02T01:00:00Z' }
+  const first = mod.commentEvent(comment, 3, 'conversation', config), edited = mod.commentEvent({ ...comment, updated_at: '2026-11-02T09:00:00Z', body: 'revised' }, 3, 'conversation', config)
+  expect(first.id).not.toBe(edited.id)
+  expect(mod.commentEvent(comment, 3, 'conversation', config).id).toBe(first.id)
 })

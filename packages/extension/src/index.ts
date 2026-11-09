@@ -10,10 +10,11 @@ import { restartService } from './service-control.js'
 import { connectionForProject, matchesProject } from './instances.js'
 import { attentionNotifier } from './attention-notifications.js'
 interface Action { action: string; ticketId?: string; text?: string; requestId?: string }
-async function run(input: Action, cwd: string, approvals: Set<string>, ctx?: ExtensionContext): Promise<unknown> {
+async function run(input: Action, cwd: string, approvals: Set<string>, ctx?: ExtensionContext, source: 'user' | 'model' = 'user'): Promise<unknown> {
   if (input.action === 'models') throw Error('模型配置仅支持交互式用户命令 /superagent models。')
-  if (['ssh', 'connect', 'disconnect', 'start', 'shutdown', 'restart', 'local', 'service'].includes(input.action) && !ctx?.hasUI) throw Error('连接和生命周期操作仅支持交互式用户命令，不能由模型工具调用。')
-  if (['open-web', 'token'].includes(input.action) && (!ctx?.hasUI || ctx.mode !== 'tui')) throw Error('此操作仅支持 Pi 终端用户命令，不能由模型工具调用。')
+  // `ctx` says an interactive UI exists, not who asked: a model tool receives the same UI context, so the source decides.
+  if (['ssh', 'connect', 'disconnect', 'start', 'shutdown', 'restart', 'local', 'service'].includes(input.action) && (source === 'model' || !ctx?.hasUI)) throw Error('连接和生命周期操作仅支持交互式用户命令，不能由模型工具调用。')
+  if (['open-web', 'token'].includes(input.action) && (source === 'model' || !ctx?.hasUI || ctx.mode !== 'tui')) throw Error('此操作仅支持 Pi 终端用户命令，不能由模型工具调用。')
   const connection = await connectionForProject(cwd, undefined, !!ctx?.hasUI && !['restart', 'local', 'start', 'shutdown', 'disconnect', 'web', 'service'].includes(input.action))
   if (!connection) throw Error('当前项目尚未配置 Super-agent，请运行 /superagent setup。')
   if (ctx) showConnection(ctx, connection.client.endpoint, connection.binding?.ssh ? `${connection.binding.ssh.host}:${connection.binding.repository}` : connection.binding?.repository)
@@ -152,7 +153,8 @@ export default function superagent(pi: ExtensionAPI): void {
   } })
   pi.registerTool({ name: 'superagent', label: 'Super-agent', description: 'Manage persistent tasks on this project’s connected application workspace service. If unconfigured, ask the user to run /superagent setup. Request acceptance is not task completion. stop revokes a ticket; retry is for failed work. Supply a stable requestId when retrying a request or followup.',
     parameters: Type.Object({ action: Type.Union(['status', 'web', 'workspace', 'tickets', 'sources', 'decisions', 'triggers', 'request', 'show', 'diagnostics', 'followup', 'stop', 'retry'].map(v => Type.Literal(v))), ticketId: Type.Optional(Type.String()), text: Type.Optional(Type.String()), requestId: Type.Optional(Type.String()) }),
-    execute: async (_id, args, _signal, _onUpdate, ctx) => { const value = await run(args, ctx?.cwd || process.cwd(), approvals); return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }], details: {} } },
+    // Forward the host context so model tools keep the interactive-only checks: without it, no lifecycle or Web command.
+    execute: async (_id, args, _signal, _onUpdate, ctx) => { const value = await run(args, (ctx as ExtensionContext | undefined)?.cwd || process.cwd(), approvals, ctx as ExtensionContext | undefined, 'model'); return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }], details: {} } },
   })
   pi.on('session_shutdown', async () => { stopNotifications(); approvals.clear(); await (await import('./remote-connections.js')).closeRemoteConnections() })
   pi.on('session_start', async (_event, ctx) => {

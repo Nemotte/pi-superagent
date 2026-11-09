@@ -170,6 +170,10 @@ it('unsubscribes a Thread by its key rather than mistaking a Ticket id for a Thr
 it('serves its bundled web entry with a CSP and bounds list queries', async () => {
   const h = await server(); const page = await fetch(h.url)
   expect(page.status).toBe(200); expect(page.headers.get('content-security-policy')).toContain("default-src 'self'")
+  expect(page.headers.get('content-security-policy')).toContain("object-src 'none'")
+  // Static assets: every module the page loads is listed, and nothing else under /web is reachable.
+  for (const asset of ['/app.js', '/ticket-panel.js', '/settings-panel.js', '/records-panel.js', '/style.css']) expect((await fetch(h.url + asset)).status).toBe(200)
+  for (const hidden of ['/web/app.js', '/%2e%2e/package.json', '/index.html.bak']) expect((await fetch(h.url + hidden)).status).toBe(404)
   expect(await page.text()).toContain('Pi Super-agent')
   expect((await fetch(h.url + '/api/v1/tickets?limit=-1', { headers: h.headers })).status).toBe(400)
   expect((await fetch(h.url + '/api/v1/tickets?limit=101', { headers: h.headers })).status).toBe(400)
