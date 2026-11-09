@@ -20,7 +20,7 @@ async function api(path, method = 'GET', data, signal) {
   const response = await fetch('/api/v1/' + path, { method, signal, headers: { 'content-type': 'application/json', 'x-superagent-local': '1', ...(csrf ? { 'x-csrf-token': csrf } : {}) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) })
   const result = await response.json()
   if (response.status === 401) showLogin()
-  if (!response.ok) throw Error(response.status === 404 && /^(requests|search|config\/history|threads\/|tickets\/.+\/conversation)/.test(path) ? '当前服务尚未加载新版面板 API。请在 Pi 中运行 /superagent restart 并确认重启。' : result.error || response.statusText)
+  if (!response.ok) throw Error(response.status === 404 && /^(requests|search|config\/history|threads\/|tickets\/.+\/(conversation|execution))/.test(path) ? '当前服务尚未加载新版面板 API。请在 Pi 中运行 /superagent restart 并确认重启。' : result.error || response.statusText)
   return result
 }
 function showLogin() { authenticated = false; $('login').hidden = false; $('workspace').hidden = true; $('connection').textContent = '未登录' }
@@ -53,6 +53,15 @@ async function loadAttention() {
   const data = await api('attention'), snapshot = JSON.stringify(data)
   if (snapshot === attentionSnapshot) return
   attentionSnapshot = snapshot
+  let alert = $('attention-alert')
+  if (!alert) { alert = text('section', ''); alert.id = 'attention-alert'; alert.className = 'card'; alert.setAttribute('role', 'alert'); $('workspace').prepend(alert) }
+  const questions = data.tickets.filter(t => t.action === 'answer')
+  const questionKey = JSON.stringify(questions.map(t => t.attentionId || `${t.id}:${t.question}`))
+  if (alert.dataset.questions !== questionKey) {
+    alert.dataset.questions = questionKey; alert.replaceChildren(); alert.hidden = !questions.length
+    if (questions.length) alert.append(text('h2', '需要你确认 / 回答'))
+    for (const t of questions) alert.append(text('p', `${t.title}：${t.question}`), button('查看并回答', () => openTicket(t.id)))
+  }
   const focused = document.activeElement?.dataset.answer
   const items = data.tickets.map(t => {
     const card = text('article', ''); card.className = 'card attention-card'
@@ -69,7 +78,7 @@ async function loadAttention() {
         try {
           await api(`tickets/${encodeURIComponent(t.id)}/followup`, 'POST', pending)
           if (answerDrafts.get(t.id)?.id === pending.id) { answerDrafts.delete(t.id); input.value = '' }
-          card.append(text('p', '回答已送达，等待 Worker 继续。'))
+          card.append(text('p', '回答已接收，等待 Worker 处理。')); await refresh()
         } finally { submit.disabled = input.disabled = false }
       })() }; card.append(form)
     }
@@ -125,7 +134,7 @@ async function refresh() {
     const readiness = reasons.join(' ') || '派单已开启：请求由 Router 评估，接单后生成工单。'
     if ($('request-readiness').textContent !== readiness) $('request-readiness').textContent = readiness
     $('stats').replaceChildren(...[['工单总数', status.tickets], ['执行中的 Worker', status.busyWorkers], ['需要关注', status.needsAttention], ['待处理 Effects', status.pendingEffects]].map(([label, value]) => { const el = text('div', label); el.className = 'card'; el.append(text('strong', value)); return el }))
-    if (!$('attention-view').hidden) await loadAttention()
+    await loadAttention()
     if (!$('tickets-view').hidden) { await loadTickets(); await ticketPanel.update() }
     if (!$('events-view').hidden) {
       const events = await api('events?after=' + eventCursor)

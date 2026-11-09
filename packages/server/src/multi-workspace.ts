@@ -16,9 +16,9 @@ export async function captureWorkspace(root: string, workspace: WorkspaceConfig)
   }
   return { schema: 1, root, repositories, ...(instructions ? { instructions } : {}) }
 }
-async function verifyWorktree(repo: RepositoryInfo, directory: string, ticketId: string): Promise<void> {
+async function verifyWorktree(repo: RepositoryInfo, directory: string, ticketId: string, branches?: Record<string, string>): Promise<void> {
   const common = realpathSync(await repositoryGit(directory, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
-  if (common !== repo.commonDir || await repositoryGit(directory, 'branch', '--show-current') !== `pi-superagent/${ticketId}` || realpathSync(await repositoryGit(directory, 'rev-parse', '--show-toplevel')) !== realpathSync(directory)) throw Error('Worktree belongs to a different repository or ticket')
+  if (common !== repo.commonDir || await repositoryGit(directory, 'branch', '--show-current') !== (branches?.[repo.id] ?? `pi-superagent/${ticketId}`) || realpathSync(await repositoryGit(directory, 'rev-parse', '--show-toplevel')) !== realpathSync(directory)) throw Error('Worktree repository identity or branch changed')
 }
 export async function prepareWorkspace(snapshot: WorkspaceSnapshot, directory: string, ticketId: string): Promise<void> {
   if (lstatSync(dirname(directory), { throwIfNoEntry: false })?.isSymbolicLink()) throw Error('Execution parent must not be a symlink')
@@ -32,10 +32,10 @@ export async function prepareWorkspace(snapshot: WorkspaceSnapshot, directory: s
     await verifyWorktree(repo, target, ticketId)
   }
 }
-export async function workspaceStatus(snapshot: WorkspaceSnapshot, directory: string, ticketId: string) {
+export async function workspaceStatus(snapshot: WorkspaceSnapshot, directory: string, ticketId: string, branches?: Record<string, string>) {
   return Promise.all(snapshot.repositories.map(async repo => {
     const target = memberPath(directory, repo.path)
-    await verifyWorktree(repo, target, ticketId)
+    await verifyWorktree(repo, target, ticketId, branches)
     const [head, diff, untracked, index] = await Promise.all([
       repositoryGit(target, 'rev-parse', 'HEAD'),
       repositoryGit(target, 'diff', '--name-only', '-z', '--ignore-submodules=all', repo.head, '--'),

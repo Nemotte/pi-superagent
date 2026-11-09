@@ -49,6 +49,76 @@ it('recovers the same ticket worktrees and saved baseline after service restart 
   expect(readFileSync(join(ticket.execution!.directory, 'frontends/portal/README.md'), 'utf8')).toBe('unfinished work')
   expect(f.runtime.store.tickets.get(ticket.id)!.assignments).toHaveLength(2)
 })
+it('moves a paused ticket to existing repositories only after confirming a fresh plan, preserving branches and dirty files', { timeout: 60000 }, async () => {
+  const f = await fixture(), ticket = await accept(f)
+  const oldDirectory = ticket.execution!.directory
+  for (const repo of [f.repos.front, f.repos.back, f.repos.child]) git(repo, 'switch', '-c', 'fix/existing')
+  rmSync(join(f.repos.front, 'README.md'))
+  const before = git(f.repos.front, 'status', '--porcelain')
+  const runtime = f.runtime as any
+  expect(runtime.executionPlan).toBeTypeOf('function')
+  const plan = await runtime.executionPlan(ticket.id)
+  await expect(runtime.useExistingExecution(ticket.id, { confirmed: true, planId: plan.planId })).rejects.toThrow(/paused/i)
+  const settings = runtime.settings(); runtime.saveSettings({ ...settings.config, paused: true }, settings.revision)
+  await expect(runtime.useExistingExecution(ticket.id, { confirmed: false, planId: plan.planId })).rejects.toThrow(/confirm/i)
+  await expect(runtime.useExistingExecution(ticket.id, { confirmed: true, planId: 'stale' })).rejects.toThrow(/changed|stale/i)
+  await runtime.useExistingExecution(ticket.id, { confirmed: true, planId: plan.planId })
+  expect(runtime.store.tickets.get(ticket.id).execution.directory).toBe(f.root)
+  const { lockExistingExecution } = await import('../src/existing-execution.js')
+  expect(() => lockExistingExecution(plan)).toThrow(/busy/)
+  await runtime.tick() // an obsolete stop effect must not release the newly reserved original checkout
+  expect(() => lockExistingExecution(plan)).toThrow(/busy/)
+  await expect(runtime.useExistingExecution(ticket.id, { confirmed: true, planId: plan.planId })).resolves.toMatchObject({ changed: false })
+  expect(readFileSync(join(oldDirectory, 'frontends/portal/README.md'), 'utf8')).toBe('frontend\n')
+  const paused = runtime.settings(); runtime.saveSettings({ ...paused.config, paused: false }, paused.revision)
+  f.messages.length = 0
+  for (let i = 0; i < 60 && !f.messages.some(m => m.target.role === 'worker'); i++) { await runtime.tick(); await new Promise(resolve => setTimeout(resolve, 25)) }
+  const target = f.messages.find(m => m.target.role === 'worker')?.target
+  expect(target?.cwd, JSON.stringify(runtime.overview().problems)).toBe(f.root)
+  expect(target.instructions).toContain('fix/existing'); expect(target.sessionDir).toContain('existing')
+  for (const repo of [f.repos.front, f.repos.back, f.repos.child]) expect(git(repo, 'branch', '--show-current')).toBe('fix/existing')
+  expect(git(f.repos.front, 'status', '--porcelain')).toBe(before)
+  expect(await runtime.workspaceView(ticket.id)).toMatchObject({ executionMode: 'existing', executionDirectory: f.root })
+  git(f.repos.front, 'switch', '-c', 'unexpected')
+  await expect(runtime.tool(target, 'report', { state: 'ready', summary: 'done', repositories: [] })).rejects.toThrow(/branch/i)
+})
+it('retains existing execution across restart and rejects stale branch previews before changing a ticket', { timeout: 60000 }, async () => {
+  const f = await fixture(), ticket = await accept(f), runtime = f.runtime as any
+  const settings = runtime.settings(); runtime.saveSettings({ ...settings.config, paused: true }, settings.revision)
+  const stale = await runtime.executionPlan(ticket.id)
+  git(f.repos.front, 'switch', '-c', 'new-branch')
+  await expect(runtime.useExistingExecution(ticket.id, { confirmed: true, planId: stale.planId })).rejects.toThrow(/changed/)
+  expect(runtime.store.tickets.get(ticket.id).execution.directory).not.toBe(f.root)
+  const plan = await runtime.executionPlan(ticket.id)
+  await runtime.useExistingExecution(ticket.id, { confirmed: true, planId: plan.planId })
+  await runtime.close()
+  const { lockExistingExecution } = await import('../src/existing-execution.js')
+  const unlock = lockExistingExecution(plan); unlock()
+  f.runtime = new Runtime(f.state, f.driver); resources.find(r => r.dir === f.dir)!.runtime = f.runtime
+  expect(await f.runtime.workspaceView(ticket.id)).toMatchObject({ executionMode: 'existing', executionDirectory: f.root })
+  const restored = f.runtime.settings(); f.runtime.saveSettings({ ...restored.config, paused: false }, restored.revision)
+  f.messages.length = 0
+  for (let i = 0; i < 60 && !f.messages.some(m => m.target.role === 'worker'); i++) { await f.runtime.tick(); await new Promise(resolve => setTimeout(resolve, 25)) }
+  expect(f.messages.find(m => m.target.role === 'worker')?.target.cwd).toBe(f.root)
+  expect(() => lockExistingExecution(plan)).toThrow(/busy/)
+})
+it('waits for an in-flight execution change on shutdown without committing it or leaking repository locks', { timeout: 60000 }, async () => {
+  const f = await fixture(), ticket = await accept(f), runtime = f.runtime as any
+  const settings = runtime.settings(); runtime.saveSettings({ ...settings.config, paused: true }, settings.revision)
+  const plan = await runtime.executionPlan(ticket.id)
+  let reached!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { reached = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  f.driver.stop = async () => { reached(); await gate }
+  const operation = runtime.useExistingExecution(ticket.id, { confirmed: true, planId: plan.planId })
+  const rejected = expect(operation).rejects.toThrow(/stopping/)
+  await entered
+  let closed = false
+  const closing = runtime.close().then(() => { closed = true })
+  await new Promise(resolve => setTimeout(resolve, 10)); expect(closed).toBe(false)
+  release(); await rejected; await closing
+  const { lockExistingExecution } = await import('../src/existing-execution.js')
+  lockExistingExecution(plan)()
+})
 it('permits an explicitly selected child through an unselected parent repository', async () => {
   const f = await fixture(['exam']), router = { role: 'router' as const, key: 'router' }
   expect(await f.runtime.tool(router, 'read', { kind: 'file', path: 'backend/exam/README.md' })).toMatchObject({ text: 'new exam head\n' })

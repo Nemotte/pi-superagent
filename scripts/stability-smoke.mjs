@@ -12,7 +12,7 @@ for (let run = 1; run <= runs; run++) {
   const log = join(directory, `${String(run).padStart(3, '0')}.log`), fd = openSync(log, 'w', 0o600)
   let result
   try {
-    result = spawnSync(process.execPath, [process.env.npm_execpath, 'test', '--', 'packages/server/tests/coordination.spec.ts', 'packages/server/tests/driver.spec.ts', 'packages/server/tests/remote-control.spec.ts', 'packages/server/tests/supervision.spec.ts', 'packages/server/tests/backup.spec.ts', 'packages/server/tests/install.spec.ts', 'packages/server/tests/stale-lock-grace.spec.ts', '--reporter=verbose'], { stdio: ['ignore', fd, fd], timeout: 180000, env: process.env })
+    result = spawnSync(process.execPath, [process.env.npm_execpath, 'test', '--', 'packages/server/tests/coordination.spec.ts', 'packages/server/tests/workspace-runtime.spec.ts', 'packages/extension/tests/attention-notifications.spec.ts', 'packages/server/tests/driver.spec.ts', 'packages/server/tests/remote-control.spec.ts', 'packages/server/tests/supervision.spec.ts', 'packages/server/tests/backup.spec.ts', 'packages/server/tests/install.spec.ts', 'packages/server/tests/stale-lock-grace.spec.ts', '--reporter=verbose'], { stdio: ['ignore', fd, fd], timeout: 180000, env: process.env })
   } finally { closeSync(fd) }
   if (result.error || result.status !== 0) {
     console.error(readFileSync(log, 'utf8').slice(-16000))

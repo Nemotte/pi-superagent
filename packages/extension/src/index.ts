@@ -8,6 +8,7 @@ import { openWeb } from './web-access.js'
 import { secretPanel } from './secret-panel.js'
 import { restartService } from './service-control.js'
 import { connectionForProject, matchesProject } from './instances.js'
+import { attentionNotifier } from './attention-notifications.js'
 interface Action { action: string; ticketId?: string; text?: string; requestId?: string }
 async function run(input: Action, cwd: string, approvals: Set<string>, ctx?: ExtensionContext): Promise<unknown> {
   if (input.action === 'models') throw Error('模型配置仅支持交互式用户命令 /superagent models。')
@@ -74,6 +75,20 @@ async function action(client: Client, input: Action): Promise<unknown> {
 export default function superagent(pi: ExtensionAPI): void {
   let settingUp = false, restarting = false
   const approvals = new Set<string>()
+  let notificationTimer: ReturnType<typeof setInterval> | undefined, notificationGeneration = 0
+  const stopNotifications = () => { notificationGeneration++; clearInterval(notificationTimer); notificationTimer = undefined }
+  const startNotifications = (ctx: ExtensionContext) => {
+    stopNotifications()
+    if (!ctx.hasUI || ctx.mode !== 'tui') return
+    const generation = notificationGeneration
+    const poll = attentionNotifier(text => ctx.ui.notify(text, 'warning'), () => generation === notificationGeneration)
+    notificationTimer = setInterval(() => { void poll(async () => {
+      const connection = await connectionForProject(ctx.cwd, undefined, false)
+      if (!connection || !await matchesProject(connection)) return { tickets: [] }
+      return { ...await connection.client.request('attention') as object, scope: connection.binding?.instanceId || connection.client.endpoint }
+    }) }, 5000)
+    notificationTimer.unref()
+  }
   const guide = async (ctx: ExtensionContext, mode: 'setup' | 'models' | 'ssh' = 'setup') => {
     if (restarting) { ctx.ui.notify('后台服务正在重启，请等待完成后再配置。', 'warning'); return }
     if (settingUp) { ctx.ui.notify('初始化向导正在运行。', 'warning'); return }
@@ -139,8 +154,9 @@ export default function superagent(pi: ExtensionAPI): void {
     parameters: Type.Object({ action: Type.Union(['status', 'web', 'workspace', 'tickets', 'sources', 'decisions', 'triggers', 'request', 'show', 'diagnostics', 'followup', 'stop', 'retry'].map(v => Type.Literal(v))), ticketId: Type.Optional(Type.String()), text: Type.Optional(Type.String()), requestId: Type.Optional(Type.String()) }),
     execute: async (_id, args, _signal, _onUpdate, ctx) => { const value = await run(args, ctx?.cwd || process.cwd(), approvals); return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }], details: {} } },
   })
-  pi.on('session_shutdown', async () => { approvals.clear(); await (await import('./remote-connections.js')).closeRemoteConnections() })
+  pi.on('session_shutdown', async () => { stopNotifications(); approvals.clear(); await (await import('./remote-connections.js')).closeRemoteConnections() })
   pi.on('session_start', async (_event, ctx) => {
+    startNotifications(ctx)
     approvals.clear()
     ctx.ui.setWidget?.('superagent-connection', undefined)
     try {

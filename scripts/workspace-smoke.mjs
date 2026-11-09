@@ -2,12 +2,13 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { initialize, startService } from '../packages/server/dist/index.js'
 import { Client } from '../packages/extension/dist/client.js'
+const existing = process.argv.includes('--existing')
 const dir = mkdtempSync(join(tmpdir(), 'sa multi sdk ')), root = join(dir, 'app'), state = join(dir, 'state')
 const environment = { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.com', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.com' }
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { env: environment, stdio: 'pipe', encoding: 'utf8' }).trim()
@@ -64,24 +65,38 @@ try {
   const recorded = git(exam, 'rev-parse', 'HEAD')
   git(backend, 'update-index', '--add', '--cacheinfo', `160000,${recorded},exam`); git(backend, 'commit', '-m', 'record gitlink without modules mapping')
   writeFileSync(join(exam, 'CLAUDE.md'), 'EXAM_CLAUDE_INSTRUCTION: preserve independent Git history.'); git(exam, 'add', '.'); git(exam, 'commit', '-m', 'advance nested checkout')
+  if (existing) { for (const path of [front, backend, exam]) git(path, 'branch', '-m', 'fix/existing'); rmSync(join(front, 'README.md')) }
   const before = [front, backend, exam].map(path => [git(path, 'rev-parse', 'HEAD'), git(path, 'status', '--porcelain')])
-  initialize(state, { repository: root, maxWorkers: 1, workspace: { repositories: [{ id: 'portal', path: 'frontends/portal' }, { id: 'backend', path: 'backend' }, { id: 'exam', path: 'backend/exam' }] } })
+  initialize(state, { repository: root, paused: existing, maxWorkers: 1, workspace: { repositories: [{ id: 'portal', path: 'frontends/portal' }, { id: 'backend', path: 'backend' }, { id: 'exam', path: 'backend/exam' }] } })
   await new Promise(resolve => model.listen(0, '127.0.0.1', resolve))
   writeFileSync(join(state, 'agent/models.json'), JSON.stringify({ providers: { 'offline-fixture': { baseUrl: `http://127.0.0.1:${model.address().port}/v1`, api: 'openai-completions', apiKey: 'offline-dummy', models: [{ id: 'mock', contextWindow: 32000, maxTokens: 1024 }] } } }))
   service = await startService(state, { port: 0 })
   assert(!existsSync(join(state, 'admin.token')))
   let client = new Client(service.url)
   const settings = await client.request('config'); settings.config.routerModel = settings.config.workerModel = { provider: 'offline-fixture', id: 'mock' }; await client.request('config', 'PUT', settings)
-  await client.request('tickets', 'POST', { id: 'cross-repo', text: 'Add matching GET /exam API contracts to frontend and exam, then verify them together.' })
+  const request = await client.request('tickets', 'POST', { id: 'cross-repo', text: 'Add matching GET /exam API contracts to frontend and exam, then verify them together.' })
+  if (existing) {
+    service.runtime.engine.evaluateDue()
+    const { ticketId } = service.runtime.engine.decide(request.id, { kind: 'accept', title: 'Unified exam API', scope: 'Update frontend and exam API files and verify that they match; preserve unrelated deletions and current branches', reason: 'Explicit fixture request' })
+    const plan = await client.request(`tickets/${ticketId}/execution`)
+    await client.request(`tickets/${ticketId}/execution`, 'POST', { confirmed: true, planId: plan.planId })
+    assert.equal(calls, 0)
+    const resume = await client.request('config'); resume.config.paused = false; await client.request('config', 'PUT', resume)
+  }
   let ticket
   for (let i = 0; i < 300; i++) { if (modelError) throw modelError; ticket = (await client.request('tickets'))[0]; if (ticket?.ended && !(await client.request('status')).busyWorkers) break; await sleep(100) }
   assert.equal(ticket?.ended?.outcome, 'completed', JSON.stringify(await client.request('status')))
-  assert(sawInstructions && sawVerification); assert.equal(ticket.assignments.length, 1)
+  assert(sawInstructions && sawVerification); assert.equal(ticket.assignments.length, existing ? 2 : 1)
   const view = await client.request(`tickets/${ticket.id}/workspace`)
   assert.deepEqual(view.repositories.filter(r => r.changed).map(r => r.id).sort(), ['exam', 'portal'])
   assert.equal(view.repositories.find(r => r.id === 'backend').mounts[0].recorded, recorded)
   assert.equal(view.report.repositories.length, 2)
-  assert.deepEqual([front, backend, exam].map(path => [git(path, 'rev-parse', 'HEAD'), git(path, 'status', '--porcelain')]), before)
+  if (existing) {
+    assert.equal(view.executionMode, 'existing'); assert.equal(ticket.execution.directory, realpathSync.native(root))
+    assert.equal(readFileSync(join(front, 'API.txt'), 'utf8'), 'GET /exam\n'); assert.equal(readFileSync(join(exam, 'API.txt'), 'utf8'), 'GET /exam\n')
+    for (const path of [front, backend, exam]) assert.equal(git(path, 'branch', '--show-current'), 'fix/existing')
+  }
+  assert.deepEqual([front, backend, exam].map(path => [git(path, 'rev-parse', 'HEAD'), git(path, 'status', '--porcelain').split('\n').filter(line => !existing || line !== '?? API.txt').join('\n')]), before)
   await service.close(); service = await startService(state, { port: 0 })
   client = new Client(service.url)
   assert.equal((await client.request('tickets')).length, 1)
@@ -112,5 +127,5 @@ try {
       await expect(page.locator('#workspace-source-notice')).toBeVisible(); assert.deepEqual(errors, [])
     } finally { await browser.close() }
   }
-  console.log(`Workspace smoke passed${process.argv.includes('--web') ? ' (including Chromium workspace/results UI)' : ''}: one real SDK Worker, frontend+nested-backend edits, cross-repository Node verification, scoped instructions, baseline gitlink differences, original checkout preservation and restart; ${calls} local model requests.`)
+  console.log(`Workspace smoke passed${existing ? ' (original checkouts, existing branches and unrelated deletion preserved)' : ''}${process.argv.includes('--web') ? ' (including Chromium workspace/results UI)' : ''}: one real SDK Worker, frontend+nested-backend edits, cross-repository Node verification, scoped instructions, baseline gitlink differences, ${existing ? 'authorized original-checkout writes' : 'original checkout preservation'} and restart; ${calls} local model requests.`)
 } finally { await service?.close(); await new Promise(resolve => { model.close(resolve); model.closeAllConnections() }); rmSync(dir, { recursive: true, force: true }) }

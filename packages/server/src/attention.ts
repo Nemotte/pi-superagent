@@ -5,7 +5,8 @@ export function attention(store: Store) {
   const priorities = { answer: 0, delivery: 1, failed: 2, blocked: 3, review: 4 }
   const tickets = store.tickets.open().flatMap(t => {
     const stage = ticketStage(t)
-    return stage.stage === 'person' ? [{ id: t.id, title: t.title, action: stage.action, question: t.attention?.question,
+    if (t.attention && store.get(`attention-response:${t.attention.id}`)) return []
+    return stage.stage === 'person' ? [{ id: t.id, title: t.title, action: stage.action, attentionId: t.attention?.id, question: t.attention?.question,
       summary: clip(latestReport(t)?.summary || t.mandate.scope), canRetry: canRetry(t), updatedAt: t.updatedAt }] : []
   }).sort((a, b) => priorities[a.action] - priorities[b.action] || a.updatedAt.localeCompare(b.updatedAt))
   const evaluations = store.db.prepare(`SELECT d.value FROM decision d WHERE json_extract(d.value, '$.kind') = 'unavailable'

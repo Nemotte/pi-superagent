@@ -147,7 +147,7 @@ export async function serveApi(runtime: Runtime, token: string | undefined, port
       if (kind === 'ticket') {
         const query = z.string().max(200).parse(url.searchParams.get('q') || '')
         const state = z.enum(['all', 'open', 'ended']).parse(url.searchParams.get('state') || 'all')
-        json(res, 200, runtime.store.searchTickets(query, state, offset, limit)); return
+        json(res, 200, runtime.store.searchTickets(query, state, offset, limit).map(ticket => ticketView(ticket, runtime.store))); return
       }
       json(res, 200, runtime.store.records(kind, offset, limit)); return
     }
@@ -157,14 +157,16 @@ export async function serveApi(runtime: Runtime, token: string | undefined, port
       const key = decodeURIComponent(subscription[1]); if (!runtime.store.threads.get(key)) throw new HttpError(404, 'Unknown thread')
       json(res, 200, runtime.engine.unsubscribe(key)); return
     }
-    const match = path.match(/^\/api\/v1\/tickets\/([^/]+)(?:\/(followup|stop|retry|subscriptions|diagnostics|workspace|conversation))?$/)
+    const match = path.match(/^\/api\/v1\/tickets\/([^/]+)(?:\/(followup|stop|retry|subscriptions|diagnostics|workspace|conversation|execution))?$/)
     if (match) {
       const id = decodeURIComponent(match[1]); const action = match[2]; const ticket = runtime.store.tickets.get(id)
       if (!ticket) throw new HttpError(404, 'Unknown ticket')
+      if (action === 'execution' && method === 'GET') { json(res, 200, await runtime.executionPlan(id)); return }
+      if (action === 'execution' && method === 'POST') { json(res, 200, await runtime.useExistingExecution(id, await body(req))); return }
       if (action === 'workspace' && method === 'GET') { json(res, 200, await runtime.workspaceView(id)); return }
       if (action === 'diagnostics' && method === 'GET') { json(res, 200, ticketDiagnostics(runtime.stateDir, id)); return }
       if (action === 'conversation' && method === 'GET') { const { offset, limit } = page(); json(res, 200, conversation(runtime.store, ticket, offset, limit)); return }
-      if (!action && method === 'GET') { json(res, 200, ticketView(ticket)); return }
+      if (!action && method === 'GET') { json(res, 200, ticketView(ticket, runtime.store)); return }
       if (method === 'POST') {
         if (action === 'followup') { json(res, 202, runtime.followup(id, await body(req))); return }
         if (action === 'stop') { json(res, 200, runtime.engine.stopTicket(id)); return }

@@ -1,5 +1,6 @@
 import { followupOwners, key, latestAssignment, ticketStage, type DomainEvent, type Ticket, type Trigger, type WorkerReport } from './core/index.js'
 import type { Store } from './store.js'
+import { recordAttentionResponse } from './attention-response.js'
 export const clip = (text: string, limit = 600) => text.length > limit ? { text: text.slice(0, limit), chars: text.length } : { text }
 export const ticketCard = (ticket: Ticket) => ({ id: ticket.id, title: ticket.title, state: ticket.ended?.outcome || ticketStage(ticket).stage, stage: ticketStage(ticket), scope: clip(ticket.mandate.scope, 400), read: { kind: 'ticket', id: ticket.id } })
 export const triggerCard = (trigger: Trigger) => ({ id: trigger.id, source: trigger.source, human: trigger.human, addressed: trigger.addressed, actor: trigger.actor, at: trigger.at, ...clip(trigger.text), url: trigger.url, threads: trigger.threads, read: { kind: 'trigger', id: trigger.id } })
@@ -8,7 +9,11 @@ export function domainNotice(store: Store, event: DomainEvent): void {
   store.audit(event)
   if (event.type === 'trigger.received' || event.type === 'trigger.followup') {
     const trigger = store.triggers.get(event.data.triggerId)
-    if (trigger?.human && followupOwners(trigger, store).length) store.enqueue('relay', `followup:${trigger.id}`, { kind: 'follow_up', triggerId: trigger.id })
+    if (trigger?.human) {
+      const owners = followupOwners(trigger, store)
+      for (const id of owners) { const ticket = store.tickets.get(id); if (ticket) recordAttentionResponse(store, ticket, trigger) }
+      if (owners.length) store.enqueue('relay', `followup:${trigger.id}`, { kind: 'follow_up', triggerId: trigger.id })
+    }
   } else if (event.type === 'ticket.ended') {
     const ticket = store.tickets.get(event.data.ticketId)!
     store.enqueue('notice', `ended:${ticket.id}`, { kind: 'ticket_ended', ticket: ticketCard(ticket) })
@@ -28,6 +33,6 @@ export function reportRelay(store: Store, ticket: Ticket, report: WorkerReport):
   const id = key('report', ticket.id, latestAssignment(ticket)?.id || '', ticket.updatedAt, JSON.stringify(report))
   store.set(`report:${id}`, { ticketId: ticket.id, report, at: ticket.updatedAt })
   store.enqueue('relay', id, { kind: report.question ? 'worker_attention' : 'worker_report', ticket: ticketCard(ticket), state: report.state,
-    summary: clip(report.summary), ...(report.question ? { question: report.question } : {}), ...(report.answers ? { answerTo: report.answers } : {}), read: { kind: 'report', id }, instructions: { kind: 'instructions', id: ticket.id } })
+    summary: clip(report.summary), ...(report.question ? { question: report.question, attentionId: ticket.attention?.id } : {}), ...(report.answers ? { answerTo: report.answers } : {}), read: { kind: 'report', id }, instructions: { kind: 'instructions', id: ticket.id } })
   return id
 }

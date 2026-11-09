@@ -8,7 +8,7 @@
     "build": "npm run build --workspace @nemotte/pi-superagent && npm run build --workspace @nemotte/pi-superagent-extension",
     "typecheck": "tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/extension/tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:integration": "node scripts/smoke.mjs && node scripts/smoke.mjs --proxy && node scripts/workspace-smoke.mjs && node scripts/ssh-smoke.mjs && node scripts/systemd-smoke.mjs && node scripts/backup-smoke.mjs",
+    "test:integration": "node scripts/smoke.mjs && node scripts/smoke.mjs --proxy && node scripts/workspace-smoke.mjs && node scripts/workspace-smoke.mjs --existing && node scripts/ssh-smoke.mjs && node scripts/systemd-smoke.mjs && node scripts/backup-smoke.mjs",
     "test:ssh": "node scripts/ssh-container-smoke.mjs",
     "test:supervision": "node scripts/systemd-smoke.mjs",
     "test:backup": "node scripts/backup-smoke.mjs",
@@ -17,7 +17,7 @@
     "test:stability": "node scripts/stability-smoke.mjs",
     "test:security": "npm audit --omit=dev --registry=https://registry.npmjs.org && npm run test:package -- --audit",
     "test:package": "node scripts/package-smoke.mjs",
-    "test:web": "node scripts/web-smoke.mjs && node scripts/submission-web-smoke.mjs && node scripts/panel-web-smoke.mjs && node scripts/workspace-smoke.mjs --web",
+    "test:web": "node scripts/web-smoke.mjs && node scripts/submission-web-smoke.mjs && node scripts/panel-web-smoke.mjs && node scripts/existing-execution-web-smoke.mjs && node scripts/workspace-smoke.mjs --web",
     "check": "npm run typecheck && npm test && npm run build",
     "verify": "npm run check && npm run test:integration && npm run test:package"
   },

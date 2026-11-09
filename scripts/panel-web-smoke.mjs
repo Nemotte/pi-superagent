@@ -92,6 +92,21 @@ try {
     return runtime.engine.decide(t.id, { kind: 'accept', title: key, scope: 'Read only', reason: 'Test request' }).ticketId
   }
   const a = makeTicket('first-detail'), b = makeTicket('second-detail')
+  await scenario('new questions are visible outside the attention tab and replies show received rather than asking again', async page => {
+    await page.locator('[data-tab="config"]').click()
+    runtime.engine.report(a, { state: 'blocked', summary: 'Need confirmation', question: '保留现有分支吗？' })
+    await expect(page.locator('#attention-alert')).toContainText('需要你确认 / 回答', { timeout: 10000 })
+    await expect(page.locator('#attention-alert')).toContainText('保留现有分支吗？')
+    await page.locator('#attention-alert').getByRole('button', { name: '查看并回答' }).click()
+    await expect(page.locator('#ticket-summary')).toContainText('first-detail')
+    await page.locator('#followup-text').fill('保留现有分支，已经确认。')
+    await page.getByRole('button', { name: '发送跟进', exact: true }).click()
+    await expect(page.locator('#ticket-summary')).toContainText('补充已接收，待处理')
+    await expect(page.locator('#ticket-summary')).not.toContainText('需要你回答：')
+    await expect(page.locator('#attention-alert')).toBeHidden({ timeout: 10000 })
+    assert(runtime.store.tickets.get(a).attention, 'receipt alone does not claim the decision or execution change is applied')
+    runtime.engine.report(a, { state: 'blocked', summary: 'Execution configuration pending', question: null })
+  })
   await scenario('late detail responses cannot replace a newer selection; drafts follow their ticket', async page => {
     await page.locator('[data-tab="tickets"]').click()
     let release, reached

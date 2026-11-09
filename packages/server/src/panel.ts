@@ -7,8 +7,9 @@ export function readiness(config: Config, needsAttention: number) {
   const missingModels = (['router', 'worker'] as const).filter(role => !config[`${role}Model`])
   return { state: missingModels.length ? 'setup' : config.paused ? 'paused' : needsAttention ? 'attention' : 'ready', missingModels }
 }
-export function ticketView(ticket: Ticket) {
-  return { ...ticket, stage: ticketStage(ticket), latestReport: latestReport(ticket),
+export function ticketView(ticket: Ticket, store?: Store) {
+  const attentionResponse = ticket.attention && store?.get(`attention-response:${ticket.attention.id}`)
+  return { ...ticket, executionMode: store?.get(`existing-execution:${ticket.id}`) ? 'existing' : 'isolated', attentionResponse, stage: attentionResponse && !ticket.ended ? { stage: 'agent', action: 'responded' } : ticketStage(ticket), latestReport: latestReport(ticket),
     actions: { stop: !ticket.ended, retry: canRetry(ticket), followup: ticket.ended?.by !== 'human' } }
 }
 export function requestView(store: Store, trigger: Trigger) {

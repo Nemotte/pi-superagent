@@ -1,4 +1,4 @@
-const labels = { answer: '需要回答', delivery: '投递失败', blocked: '需要解除阻塞', failed: '执行失败', review: '等待审阅', queued: '等待执行', working: '正在执行', idle: '等待新输入', completed: '已完成', merged: '已合并', closed: '已关闭', stopped: '已停止', dropped: '已结束（无需继续）' }
+const labels = { responded: '补充已接收，待处理', answer: '需要回答', delivery: '投递失败', blocked: '需要解除阻塞', failed: '执行失败', review: '等待审阅', queued: '等待执行', working: '正在执行', idle: '等待新输入', completed: '已完成', merged: '已合并', closed: '已关闭', stopped: '已停止', dropped: '已结束（无需继续）' }
 export const stageLabel = ticket => labels[ticket.ended?.outcome || ticket.stage?.action || ticket.stage?.stage || ticket.assignments?.at(-1)?.report?.state] || '等待执行'
 
 export function createTicketPanel({ $, api, text, button, safe, renderWorkspace, refresh, openThread }) {
@@ -44,12 +44,24 @@ export function createTicketPanel({ $, api, text, button, safe, renderWorkspace,
     if (next !== snapshot) {
       snapshot = next
       const summary = $('ticket-summary'); summary.replaceChildren(text('h2', ticket.title), text('strong', stageLabel(ticket)))
-      if (ticket.attention?.question) summary.append(text('p', '需要你回答：' + ticket.attention.question))
+      if (ticket.attentionResponse) summary.append(text('p', '补充已接收，等待 Worker 处理；执行配置不会因聊天回复而自动改变。'))
+      else if (ticket.attention?.question) summary.append(text('p', '需要你回答：' + ticket.attention.question))
+      summary.append(text('p', `执行方式：${ticket.executionMode === 'existing' ? '原工作区 / 保留现有分支' : '隔离工作树'} · ${ticket.execution?.directory || ''}`))
       if (ticket.latestReport) summary.append(text('h3', '最新进展 / 结果'), text('p', ticket.latestReport.summary))
       const controls = $('ticket-actions'); controls.replaceChildren()
       for (const [label, action] of [['停止', 'stop'], ['重试', 'retry']]) if (ticket.actions?.[action]) controls.append(button(label, async () => {
         if (!confirm(`${label}“${ticket.title}”？`)) return
         await api(`${path}/${action}`, 'POST'); if (selected === id) await update(); await refresh()
+      }))
+      if (!ticket.ended && ticket.executionMode !== 'existing') controls.append(button('切换到原工作区执行', async () => {
+        const status = await api('status')
+        if (!status.paused) throw Error('请先点击“暂停派单”，再确认切换执行方式。')
+        const plan = await api(`${path}/execution`)
+        const members = plan.snapshot.repositories.map(r => `${r.path} · ${plan.branches[r.id]} · ${r.head}\n${r.dirty ? '存在未提交修改/删除，须保留且不得混入提交' : '当前工作树干净'}`).join('\n')
+        if (!confirm(`直接修改原工作区：${plan.snapshot.root}\n${members}\n停止本票旧 Worker，保留旧隔离目录；不切换分支、不清理现有改动。其他原目录任务不得并发。实例备份不包含原仓库文件，须单独备份。切换后仍暂停，需另行恢复派单。确认？`)) return
+        await api(`${path}/execution`, 'POST', { confirmed: true, planId: plan.planId })
+        if (selected === id) await update()
+        await refresh()
       }))
       $('followup-form').hidden = ticket.actions?.followup === false
       const metadata = $('ticket-metadata'); metadata.replaceChildren(text('h3', '授权范围'), text('p', ticket.mandate.scope), text('small', `策略版本：${ticket.mandate.policyVersion}`))

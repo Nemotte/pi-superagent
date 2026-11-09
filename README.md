@@ -110,7 +110,9 @@ node packages/server/dist/cli.js workspace TICKET_ID --state-dir "$HOME/.pi-supe
 
 `workspace` 查询要求服务在线。工作区实例目录必须位于应用根之外。成员与根路径在创建后固定；现有单仓库实例保持原配置，不自动迁移。
 
-首次执行前保存各成员 HEAD，再按原相对布局创建工单 worktree；重试沿用原基线。子仓库当前 HEAD 与父 gitlink 的已有差异单独显示，显式暂存 gitlink 才计入父仓库变更。Worker 加载工作区根 `AGENTS.md` 和成员 `AGENTS.md`（无则读 `CLAUDE.md`），按目录标明范围，总预算 32000 字符。
+需要直接修改原仓库并保留现有分支时：先在 Web 暂停派单 → 打开工单 → **切换到原工作区执行** → 核对目录、分支和未提交状态后确认 → 单独恢复派单。旧隔离文件保留；原目录执行按仓库加锁，不自动切换分支或清理用户改动。聊天回复不会自动完成配置切换。待确认问题会在 Web 顶部及已连接 Pi 会话主动提示；回复后显示“补充已接收，待处理”。
+
+默认隔离执行：首次执行前保存各成员 HEAD，再按原相对布局创建工单 worktree；重试沿用原基线。子仓库当前 HEAD 与父 gitlink 的已有差异单独显示，显式暂存 gitlink 才计入父仓库变更。Worker 加载工作区根 `AGENTS.md` 和成员 `AGENTS.md`（无则读 `CLAUDE.md`），按目录标明范围，总预算 32000 字符。
 
 Web“工作区”查看成员，工单“仓库变更与验证”查看分仓库改动与检查结果。当前多仓库使用本地派单，代码远端可以是 GitLab；跨仓库 GitHub 来源/PR、GitLab Issue/MR 渠道和原地执行尚未接入。详情见 [多仓库规范](docs/superpowers/specs/2026-11-04-multi-repository-workspace.md)。
 
@@ -149,7 +151,7 @@ pi install /absolute/path/to/dsh-super-agent/packages/extension
 
 进入目标项目启动 Pi，输入 **`/superagent`**。已打开的 Pi 使用 `/reload`。向导引导选择单仓库或整个工作区、实例目录和端口，经确认启动服务，再选择模型并独立登录；OAuth 会尝试自动打开浏览器，并保留手动链接；默认 GitHub 关闭、1 个 Worker，配置阶段暂停派单。可选择一次简短模型验证，再确认恢复派单。
 
-`/superagent setup` 可重新配置或连接已有实例。项目绑定保存在用户私有目录，不写入仓库；下次进入同一项目，或工作区内已注册仓库的子目录，会自动找到它，无需每次设置环境变量。任务仍从已提交 HEAD 创建独立 worktree，不包含当前未提交修改；本地 Git 仓库不需要 GitHub 账号、PAT 或远端。
+`/superagent setup` 可重新配置或连接已有实例。项目绑定保存在用户私有目录，不写入仓库；下次进入同一项目，或工作区内已注册仓库的子目录，会自动找到它，无需每次设置环境变量。任务默认从已提交 HEAD 创建独立 worktree，不包含当前未提交修改；本地 Git 仓库不需要 GitHub 账号、PAT 或远端。
 
 Web 地址固定显示在 Pi 连接栏；即使模型登录取消也会保留。使用 `/superagent web` 或菜单“打开 Web 控制台”：本地模式直接打开，token 模式用一次性授权自动登录；`/superagent web url` 只查看地址。token 模式下可用 `/superagent token` 私密查看/复制管理凭据。本地模式菜单不显示令牌入口。打开 Web 不会启动或重启服务。
 
@@ -181,7 +183,7 @@ npm run test:install
 ```
 
 - `check`：TypeScript、领域及适配器测试、两个包的构建。
-- `test:integration`：真实 Pi SDK 子进程连接本地脚本化模型和 GitHub REST 模拟端点，验证入站 → Router → Worker → Router 受控回复、提问后人工跟进停止、静默规则传递、项目指令、无唤醒背景通知、Session 和重启去重；另用一个真实 SDK Worker 修改前端和嵌套后端、运行 Node 跨仓库一致性检查、提交整体/分仓库报告并重启核验。模型响应由本地脚本提供，无付费模型或真实 GitHub 写入。另在 Linux 验证 SSH stdio 控制桥、远端生命周期和隔离 SDK 测试认证；校验 systemd unit，并对临时 launcher 执行实际进程崩溃、等待锁过期和持久状态恢复。第二次启动由测试脚本驱动，不向宿主注册 unit。另以真实临时 CLI 验证离线快照、预检、原路径恢复、凭据/会话/工作文件和请求幂等；单元回归使用真实 SDK 核验恢复后仍选择同一最近会话。
+- `test:integration`：真实 Pi SDK 子进程连接本地脚本化模型和 GitHub REST 模拟端点，验证入站 → Router → Worker → Router 受控回复、提问后人工跟进停止、静默规则传递、项目指令、无唤醒背景通知、Session 和重启去重；分别在默认隔离与显式原目录模式下，用真实 SDK Worker 修改前端和嵌套后端、运行 Node 跨仓库一致性检查、提交整体/分仓库报告并重启核验。模型响应由本地脚本提供，无付费模型或真实 GitHub 写入。另在 Linux 验证 SSH stdio 控制桥、远端生命周期和隔离 SDK 测试认证；校验 systemd unit，并对临时 launcher 执行实际进程崩溃、等待锁过期和持久状态恢复。第二次启动由测试脚本驱动，不向宿主注册 unit。另以真实临时 CLI 验证离线快照、预检、原路径恢复、凭据/会话/工作文件和请求幂等；单元回归使用真实 SDK 核验恢复后仍选择同一最近会话。
 - `test:install`：生成或消费统一发布目录，在空 HOME 中以原生 npm ci 安装两个隔离依赖根，验证真实 Pi RPC 插件注册、SDK 加载后的向导/遮罩测试 key、CLI/Web/请求幂等/Node Job 和停止；`--audit` 审计两个真实安装根。CI 六个 OS/架构目标消费同一份 artifact，全部安装与常规测试通过才输出 verified artifact。
 - `test:package`：打包两个 npm tarball，在独立目录安装，验证 CLI、Web、后台启动/停止、备份，以及已安装插件的多仓库向导/CLI 发现、实例 SDK 认证 IPC、私密输入遮罩和成员目录连接继承。另验证 token 模式登录、无 Token 的本地重启、旧实例切换本地模式、删除测试 Token 后再次重启及状态保留。模型认证使用测试 API key，不发起付费模型请求。会从 npm 下载依赖，不会发布包。
 

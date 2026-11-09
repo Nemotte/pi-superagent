@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { initialize } from '../src/config.js'
 import { Runtime } from '../src/runtime.js'
+import { ticketView } from '../src/panel.js'
 import type { AgentTarget, Delivery } from '../src/agent-protocol.js'
 const resources: Array<{ dir: string; runtime: Runtime }> = []
 // These tests drive ticks explicitly; OS wall-clock corrections must not move freshly queued effects into the future.
@@ -37,6 +38,41 @@ it('relays questions and outcomes but keeps ordinary progress internal', async (
   await h.runtime.tool(h.worker, 'report', { state: 'blocked', summary: 'Need a decision', question: 'Keep the existing spelling?' }); await h.runtime.tick()
   const messages = h.messages.filter(m => m.target.role === 'router').map(m => JSON.parse(m.delivery.text))
   expect(messages.some(m => m.kind === 'worker_attention' && m.question === 'Keep the existing spelling?')).toBe(true)
+})
+it('records a received answer without pretending execution changed, and requires the old question to be resolved explicitly', async () => {
+  const h = await fixture()
+  await h.runtime.tool(h.worker, 'report', { state: 'blocked', summary: 'Choose execution', question: 'Use the existing checkout?' })
+  const before = h.runtime.store.tickets.get(h.ticketId)!
+  expect(h.runtime.attention().tickets[0]).toMatchObject({ attentionId: before.attention!.id })
+  const receipt = await h.runtime.tool(router, 'reply', { purpose: 'attention', ticketId: h.ticketId, question: before.attention!.question, text: before.attention!.question }) as { id: string }
+  h.messages.length = 0
+  const response = h.runtime.followup(h.ticketId, { id: 'confirmed', text: 'Use existing checkout; no new worktree.' })
+  expect(h.runtime.store.get<any>(`reply:${receipt.id}`).status).toBe('dropped')
+  await h.runtime.tick()
+  expect(h.messages.some(m => m.target.role === 'router' && JSON.parse(m.delivery.text).kind === 'worker_attention')).toBe(false)
+  expect(ticketView(h.runtime.store.tickets.get(h.ticketId)!, h.runtime.store)).toMatchObject({ attentionResponse: { triggerId: response.id }, stage: { action: 'responded' } })
+  expect(h.runtime.store.tickets.get(h.ticketId)!.execution).toEqual(before.execution)
+  expect(h.runtime.attention().tickets).toHaveLength(0)
+  await expect(h.runtime.tool(h.worker, 'report', { state: 'blocked', summary: 'No further question; host configuration is needed' })).rejects.toThrow(/question/)
+  await expect(h.runtime.tool(h.worker, 'report', { state: 'blocked', summary: 'Ask again', question: 'Use the existing checkout?' })).rejects.toThrow(/response/)
+  await h.runtime.tool(h.worker, 'report', { state: 'blocked', summary: 'Execution configuration required', question: null })
+  expect(h.runtime.attention().tickets[0]).toMatchObject({ action: 'blocked' })
+  expect(h.runtime.store.tickets.get(h.ticketId)!.attention).toBeUndefined()
+})
+it('recovers already-received answers on upgrade from durable report and input records', async () => {
+  const h = await fixture()
+  await h.runtime.tool(h.worker, 'report', { state: 'blocked', summary: 'Confirm', question: 'Use the original directory?' })
+  const attention = h.runtime.store.tickets.get(h.ticketId)!.attention!
+  const { recoverAttentionResponse } = await import('../src/attention-response.js')
+  recoverAttentionResponse(h.runtime.store, h.runtime.store.tickets.get(h.ticketId)!)
+  expect(h.runtime.store.get(`attention-response:${attention.id}`)).toBeUndefined()
+  const response = h.runtime.followup(h.ticketId, { id: 'old-answer', text: 'Confirmed; do not ask again.' })
+  h.runtime.store.db.prepare('DELETE FROM kv WHERE key=?').run(`attention-response:${attention.id}`)
+  await h.runtime.close()
+  const restored = new Runtime(h.dir, { send: async () => {}, stop: async () => {}, close: async () => {} }, { prepare: async () => {} })
+  resources.find(r => r.dir === h.dir)!.runtime = restored
+  expect(ticketView(restored.store.tickets.get(h.ticketId)!, restored.store)).toMatchObject({ attentionResponse: { triggerId: response.id }, stage: { action: 'responded' } })
+  expect(restored.attention().tickets).toHaveLength(0)
 })
 it('requires Router to forward the saved human question without rewriting it', async () => {
   const h = await fixture()

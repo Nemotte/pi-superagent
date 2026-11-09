@@ -33,6 +33,8 @@ POSIX 目标目录为 0700、普通文件为 0600、可执行文件为 0700；�
 - SQLite 在目标副本中恢复 WAL，并转换为独立数据库；不修改源数据库。新建且尚无 SQLite 的实例也能备份。
 - 不包含系统 unit 文件、npm 包、Node 运行时或外部源仓库 Git 对象库。supervision.json 可作为历史文件保存在快照中，恢复时不会装回。
 
+显式启用“原工作区执行”的工单直接写实例目录之外的源仓库；实例快照保存工单配置和会话，**不包含原仓库工作文件及未提交修改**。这些文件与完整 Git 状态须单独备份；恢复实例也不会回退原仓库内容。切换前留下的隔离工作目录仍按原规则备份。
+
 工作目录内的 `.git` 文件通常指向源仓库的 **Git common-dir**。外部仓库备份需覆盖 common-dir 中的 worktrees 管理区、index 和未提交 blob；代码提交本身不保存全部这些状态。本功能记录并核对这些依赖，不执行 Git reset/fetch/repair 或覆盖共享 refs；宿主 Git 检查设置 GIT_NO_LAZY_FETCH=1，禁止 partial clone 按需自动获取对象。
 
 `backup-check` 验证文件清单、SHA256、路径、SQLite 完整性/schema、源仓库身份、任务分支/HEAD及其管理区指纹。管理区有变化时返回 `BACKUP_GIT_CHANGED`，应核对对应仓库备份和执行状态。完整 Git 对象库的灾难恢复由仓库备份负责。

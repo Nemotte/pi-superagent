@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, sep } from 'node:path'
+import { realpathSync } from 'node:fs'
 import { lockSync } from 'proper-lockfile'
 import { z } from 'zod'
-import { Engine, key, latestAssignment, latestReport, liveTicket, type AssessmentOutcome, type OutboundMessage, type Policy, type Ticket, type Trigger } from './core/index.js'
+import { Engine, latestAssignment, latestReport, liveTicket, type AssessmentOutcome, type OutboundMessage, type Policy, type Ticket, type Trigger } from './core/index.js'
 import { ConfigSchema, readConfig, type Config } from './config.js'
 import { Store, type Effect } from './store.js'
 import { prepareWorktree } from './workspace.js'
@@ -16,8 +17,10 @@ import { AssessmentSchema, assessmentOutcome } from './assessment.js'
 import { domainNotice, followupRelay, reportRelay, triggerCard, ticketCard } from './notices.js'
 import { ContextReader, candidateCard, inputCard, instructionContext } from './context.js'
 import { attention } from './attention.js'
+import { recordAttentionResponse, recoverAttentionResponse } from './attention-response.js'
 import { readiness } from './panel.js'
 import { registeredService } from './supervision-config.js'
+import { existingExecutionPlan, lockExistingExecution, type ExistingExecution } from './existing-execution.js'
 
 export const RequestSchema = z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).default(() => randomUUID()), text: z.string().trim().min(1).max(20000) }).strict()
 const RouteSchema = z.discriminatedUnion('kind', [
@@ -39,6 +42,11 @@ export class Runtime {
   private readonly unlock: () => void
   private readonly running = new Map<number, Promise<void>>()
   private readonly busy = new Set<string>()
+  private readonly existingLocks = new Map<string, () => void>()
+  private changingExecution = false
+  private executionChange?: Promise<void>
+  private existingExecution(id: string) { return this.store.get<ExistingExecution>(`existing-execution:${id}`) }
+  private releaseExisting(id: string) { const release = this.existingLocks.get(id); if (release) { this.existingLocks.delete(id); release() } }
   private timer?: ReturnType<typeof setInterval>
   private closing = false
   private closePromise?: Promise<void>
@@ -70,6 +78,7 @@ export class Runtime {
       })
       this.github = new GitHubSource({ store: this.store, engine: this.engine, stateDir, config: () => this.settings().config, client: options.githubClient, now: options.now })
       for (const ticket of this.store.tickets.open()) {
+        this.store.atomic(() => recoverAttentionResponse(this.store, ticket))
         const a = latestAssignment(ticket)
         if (a?.state === 'running') this.engine.assignmentInterrupted(ticket.id, a.id)
         else if (a?.state === 'pending') this.store.enqueue('launch', a.id, { ticketId: ticket.id, assignmentId: a.id })
@@ -83,6 +92,8 @@ export class Runtime {
   }
   saveSettings(input: unknown, revision: number): ReturnType<Runtime['settings']> {
     const config = ConfigSchema.parse(input)
+    if (this.changingExecution && !config.paused) throw Error('Execution configuration is busy; dispatch must remain paused')
+    if (config.github?.enabled && (this.changingExecution || this.store.tickets.open().some(t => this.existingExecution(t.id)))) throw Error('Existing execution supports manual/local tasks; keep GitHub disabled until these tickets end')
     return this.store.atomic(() => {
       const old = this.settings()
       if (old.revision !== revision) throw Error('Settings revision conflict')
@@ -107,10 +118,12 @@ export class Runtime {
     if (!ticket) throw Error('Unknown ticket')
     if (ticket.ended?.by === 'human') throw Error('Ticket was stopped; create a new request')
     const origin = this.store.triggers.get(ticket.origin.triggerId)!
-    if (origin.source === 'manual') return this.manual(RequestSchema.parse(input), origin.threads[0].id)
+    const request = RequestSchema.parse(input)
     return this.store.atomic(() => {
-      const trigger = this.manual(RequestSchema.parse(input), `ticket-${ticket.id}`)
-      if (!this.store.triggers.disposition(trigger.id)?.fanout.includes(ticket.id)) this.engine.attach(ticket.id, trigger.id)
+      const fresh = !this.store.triggers.get(`manual:${request.id}`)
+      const trigger = this.manual(request, origin.source === 'manual' ? origin.threads[0].id : `ticket-${ticket.id}`)
+      if (origin.source !== 'manual' && !this.store.triggers.disposition(trigger.id)?.fanout.includes(ticket.id)) this.engine.attach(ticket.id, trigger.id)
+      if (fresh) recordAttentionResponse(this.store, ticket, trigger)
       return trigger
     })
   }
@@ -132,6 +145,60 @@ export class Runtime {
     }
     return result
   }
+  async executionPlan(ticketId: string) {
+    const ticket = this.store.tickets.get(ticketId)
+    if (!ticket || !liveTicket(ticket)) throw Error('Execution requires an open ticket')
+    const plan = await existingExecutionPlan(this.settings().config, ticketId)
+    const inside = relative(plan.snapshot.root, realpathSync.native(this.stateDir))
+    if (!inside || inside !== '..' && !inside.startsWith('..' + sep) && !isAbsolute(inside)) throw Error('Existing execution requires instance secrets outside the workspace root')
+    return plan
+  }
+  async useExistingExecution(ticketId: string, input: unknown) {
+    if (this.closing) throw Error('Service is stopping')
+    const request = z.object({ confirmed: z.boolean(), planId: z.string().min(1) }).strict().parse(input)
+    if (!request.confirmed) throw Error('Explicit confirmation is required')
+    if (!this.settings().config.paused) throw Error('Dispatch must be paused before changing execution')
+    if (this.changingExecution) throw Error('Execution configuration is busy')
+    const saved = this.existingExecution(ticketId)
+    if (saved?.planId === request.planId) return { changed: false, mode: 'existing', root: saved.snapshot.root }
+    if (saved) throw Error('Existing execution is already configured; branch changes require a new ticket')
+    this.changingExecution = true
+    let finish!: () => void
+    this.executionChange = new Promise<void>(resolve => { finish = resolve })
+    let release: (() => void) | undefined
+    try {
+      await Promise.allSettled([...this.running.values()])
+      const plan = await this.executionPlan(ticketId)
+      if (plan.planId !== request.planId) throw Error('Execution preview changed; review a fresh plan')
+      release = lockExistingExecution(plan)
+      await this.driver.stop(`worker-${ticketId}`)
+      this.busy.delete(ticketId)
+      if (this.closing) throw Error('Service is stopping')
+      if (!this.settings().config.paused) throw Error('Dispatch must remain paused')
+      if ((await this.executionPlan(ticketId)).planId !== request.planId) throw Error('Execution preview changed while stopping Worker')
+      if (this.closing) throw Error('Service is stopping')
+      this.store.atomic(() => {
+        const ticket = this.store.tickets.get(ticketId)!
+        if (!liveTicket(ticket)) throw Error('Ticket ended during execution configuration')
+        const previous = ticket.execution
+        this.store.set(`previous-execution:${ticketId}`, { execution: previous, workspace: this.store.get(`workspace:${ticketId}`) })
+        ticket.execution = { ...previous!, directory: plan.snapshot.root }
+        this.store.tickets.save(ticket)
+        this.store.set(`existing-execution:${ticketId}`, plan)
+        this.store.set(`workspace:${ticketId}`, plan.snapshot)
+        this.engine.report(ticketId, { state: 'blocked', question: null, summary: '执行配置已切换至原工作区；旧隔离文件已保留。当前仍暂停，请确认后恢复派单。' })
+        this.engine.retryTicket(ticketId)
+        // The old child was already stopped and awaited above. Its queued stop must not
+        // release the new original-checkout lease after this transaction commits.
+        for (const effect of this.store.pendingEffects()) {
+          if (effect.kind === 'stop' && (effect.payload as { ticketId?: string }).ticketId === ticketId) this.store.finishEffect(effect)
+        }
+        this.store.audit({ type: 'execution.changed', ticketId, mode: 'existing', root: plan.snapshot.root, branches: plan.branches, previous })
+      })
+      this.existingLocks.set(ticketId, release); release = undefined
+      return { changed: true, mode: 'existing', root: plan.snapshot.root, paused: true }
+    } finally { try { release?.() } finally { this.changingExecution = false; finish(); this.executionChange = undefined } }
+  }
   async workspaceView(ticketId?: string): Promise<{ repositories: unknown[]; [key: string]: unknown }> {
     const config = this.settings().config
     const ticket = ticketId ? this.store.tickets.get(ticketId) : undefined
@@ -141,10 +208,10 @@ export class Runtime {
     let repositories: unknown[] = config.workspace?.repositories || [{ id: 'repository', path: '.' }]
     let error: string | undefined
     if (snapshot && ticket?.execution) {
-      try { repositories = await workspaceStatus(snapshot, ticket.execution.directory, ticket.id) }
+      try { repositories = await workspaceStatus(snapshot, ticket.execution.directory, ticket.id, this.existingExecution(ticket.id)?.branches) }
       catch (e) { error = String(e).slice(0, 500); repositories = snapshot.repositories.map(r => ({ id: r.id, path: r.path, baseHead: r.head, state: 'unavailable' })) }
     }
-    return { kind: config.workspace ? 'workspace' : 'repository', root: config.repository, ...(ticketId ? { ticketId } : {}), prepared: !!snapshot && !error, repositories, ...(error ? { error } : {}), ...(result ? { report: result.report, reportRead: result.read } : {}) }
+    return { kind: config.workspace ? 'workspace' : 'repository', root: config.repository, executionMode: ticketId && this.existingExecution(ticketId) ? 'existing' : 'isolated', executionDirectory: ticket?.execution?.directory, ...(ticketId ? { ticketId } : {}), prepared: !!snapshot && !error, repositories, ...(error ? { error } : {}), ...(result ? { report: result.report, reportRead: result.read } : {}) }
   }
   overview() {
     const tickets = this.store.tickets.list(), registration = registeredService(this.stateDir)
@@ -161,7 +228,7 @@ export class Runtime {
   }
   start(): void { this.timer ??= setInterval(() => { void this.tick().catch(error => console.error('scheduler:', String(error))) }, 500) }
   async tick(): Promise<void> {
-    if (this.closing) return
+    if (this.closing || this.changingExecution) return
     this.engine.evaluateDue()
     const tasks: Promise<void>[] = [this.github.tick()]
     for (const row of this.store.pendingEffects().filter(e => e.due <= Date.now()).slice(0, 100)) {
@@ -177,12 +244,13 @@ export class Runtime {
   }
   private target(ticket?: Ticket): AgentTarget {
     const { config, revision } = this.settings()
+    const existing = ticket && this.existingExecution(ticket.id)
     const instructions = JSON.stringify(instructionContext(config, revision, ticket))
     return { role: ticket ? 'worker' : 'router', key: ticket ? `worker-${ticket.id}` : 'router',
       cwd: ticket?.execution?.directory ?? this.stateDir, agentDir: join(this.stateDir, 'agent'),
-      sessionDir: join(this.stateDir, 'sessions', ticket?.id ?? 'router'), model: ticket ? config.workerModel : config.routerModel,
+      sessionDir: join(this.stateDir, 'sessions', ticket?.id ?? 'router', ...(existing ? ['existing'] : [])), model: ticket ? config.workerModel : config.routerModel,
       github: !!config.github?.enabled && !config.workspace,
-      instructions: `${instructions}\n${ticket ? `Authorized scope: ${ticket.mandate.scope}. Ticket branch: pi-superagent/${ticket.id}.` : ''}${config.github?.enabled ? ` GitHub repository/account: ${config.github.repository} / ${config.github.botLogin}` : ''}`,
+      instructions: `${instructions}\n${ticket ? `Authorized scope: ${ticket.mandate.scope}. ${existing ? `Execution mode: existing original workspaces. Preserve these branches: ${JSON.stringify(existing.branches)}. Preserve pre-existing dirty/deleted files; do not stage unrelated changes or create/switch worktrees.` : `Execution mode: isolated. Ticket branch: pi-superagent/${ticket.id}.`}` : ''}${config.github?.enabled ? ` GitHub repository/account: ${config.github.repository} / ${config.github.botLogin}` : ''}`,
       ...(config.workspace ? { workspace: { ...config.workspace, instructions: ticket ? this.store.get<WorkspaceSnapshot>(`workspace:${ticket.id}`)?.instructions : undefined } } : {}),
       ...(ticket ? { ticketId: ticket.id, assignmentId: latestAssignment(ticket)!.id } : {}) }
   }
@@ -193,6 +261,7 @@ export class Runtime {
   }
   private reserve(ticket: Ticket, human = false): void {
     if (this.busy.has(ticket.id)) return
+    if ([...this.existingLocks.keys()].some(id => id !== ticket.id) || this.existingExecution(ticket.id) && this.busy.size) throw new Deferred('Original workspace execution is exclusive')
     if (this.busy.size >= this.settings().config.maxWorkers + Number(human)) throw new Deferred('Worker slots full')
     this.busy.add(ticket.id)
   }
@@ -201,7 +270,11 @@ export class Runtime {
     if (row.kind === 'relay' || row.kind === 'notice') {
       if (this.store.pendingEffects().some(e => e.kind === row.kind && e.seq < row.seq)) throw new Deferred('Earlier Router message is pending')
       if (row.kind === 'notice' && !this.store.get('router-started')) throw new Deferred('Background notices do not start Router')
-      const payload = row.payload as { kind: string; triggerId?: string }
+      const payload = row.payload as { kind: string; triggerId?: string; ticket?: { id: string }; question?: string; attentionId?: string }
+      if (payload.kind === 'worker_attention') {
+        const attention = payload.ticket && this.store.tickets.get(payload.ticket.id)?.attention
+        if (!attention || attention.question !== payload.question || payload.attentionId && attention.id !== payload.attentionId || this.store.get(`attention-response:${attention.id}`)) return
+      }
       const message = payload.kind === 'follow_up' ? followupRelay(this.store, payload.triggerId!) : payload
       if (message) { await this.driver.send(this.target(), { id: `${row.kind}:${row.seq}:${row.generation}`, text: JSON.stringify(message), ...(row.kind === 'notice' ? { wake: false as const } : {}) }); this.store.set('router-started', true) }
       return
@@ -214,7 +287,7 @@ export class Runtime {
     }
     if (row.kind === 'stop') {
       // Stop the process before a replacement Assignment can launch.
-      await this.driver.stop(`worker-${p.ticketId}`); this.busy.delete(p.ticketId!); return
+      await this.driver.stop(`worker-${p.ticketId}`); this.busy.delete(p.ticketId!); this.releaseExisting(p.ticketId!); return
     }
     if (row.kind === 'reply') {
       const receipt = this.store.get<Receipt>(`reply:${row.key}`)
@@ -240,7 +313,11 @@ export class Runtime {
       this.reserve(ticket)
       try {
         const config = this.settings().config
-        if (config.workspace) {
+        const existing = this.existingExecution(ticket.id)
+        if (existing) {
+          if (!this.existingLocks.has(ticket.id)) this.existingLocks.set(ticket.id, lockExistingExecution(existing))
+          await workspaceStatus(existing.snapshot, existing.snapshot.root, ticket.id, existing.branches)
+        } else if (config.workspace) {
           let snapshot = this.store.get<WorkspaceSnapshot>(`workspace:${ticket.id}`)
           if (!snapshot) { snapshot = await captureWorkspace(config.repository, config.workspace); this.store.set(`workspace:${ticket.id}`, snapshot) }
           await prepareWorkspace(snapshot, ticket.execution!.directory, ticket.id)
@@ -256,6 +333,11 @@ export class Runtime {
       } catch (error) { this.busy.delete(ticket.id); throw error }
     } else if (row.kind === 'delivery') {
       if (latestAssignment(ticket)?.state !== 'running' || this.store.pendingEffects().some(e => e.kind === 'launch' && (e.payload as { ticketId: string }).ticketId === ticket.id)) throw new Deferred('Waiting for assignment launch')
+      const existing = this.existingExecution(ticket.id)
+      if (existing) {
+        if (!this.existingLocks.has(ticket.id)) this.existingLocks.set(ticket.id, lockExistingExecution(existing))
+        await workspaceStatus(existing.snapshot, existing.snapshot.root, ticket.id, existing.branches)
+      }
       this.reserve(ticket, ticket.inputs.some(i => ticket.undelivered.includes(i.id) && i.kind === 'trigger' && i.human))
       try {
         for (const id of ticket.undelivered) {
@@ -294,6 +376,11 @@ export class Runtime {
           z.object({ purpose: z.enum(['answer', 'result', 'attention']), ticketId: z.string().optional(), triggerId: z.string().optional(), question: z.string().optional(), text: z.string().trim().min(1).max(4000) }).strict(),
         ]).parse(args)
         if (v.purpose === 'attention' && v.text !== v.question?.trim()) throw Error('Forward the saved question unchanged')
+        if (v.purpose === 'attention' && !v.ticketId) throw Error('Attention replies require ticketId to verify the current question')
+        if (v.purpose === 'attention' && v.ticketId) {
+          const attention = this.store.tickets.get(v.ticketId)?.attention
+          if (attention && this.store.get(`attention-response:${attention.id}`)) throw Error('The person already responded; do not repeat the old question')
+        }
         return this.engine.reply(v)
       }
       if (name === 'assess') {
@@ -342,7 +429,13 @@ export class Runtime {
     }
     if (name === 'report') {
       const report = ReportSchema.parse(args), config = this.settings().config
+      if (ticket.attention && this.store.get(`attention-response:${ticket.attention.id}`)) {
+        if (report.question === undefined) throw Error('A response was received: explicitly set question:null to close the old question, or ask a new concrete question')
+        if (report.question === ticket.attention.question) throw Error('A response was already received for this question; process it instead of asking the same question again')
+      }
       let observed: Awaited<ReturnType<typeof workspaceStatus>> | undefined
+      const existing = this.existingExecution(ticket.id)
+      if (existing) { await workspaceStatus(existing.snapshot, existing.snapshot.root, ticket.id, existing.branches); this.current(target) }
       if (config.workspace) {
         const ids = (report.repositories || []).map(r => r.id)
         if (new Set(ids).size !== ids.length || ids.some(id => !config.workspace!.repositories.some(r => r.id === id))) throw Error('Report contains unknown or duplicate workspace repositories')
@@ -350,7 +443,7 @@ export class Runtime {
           if (!report.repositories) throw Error('Workspace ready report requires repositories results and checks')
           const snapshot = this.store.get<WorkspaceSnapshot>(`workspace:${ticket.id}`)
           if (!snapshot) throw Error('Workspace was not prepared')
-          observed = await workspaceStatus(snapshot, ticket.execution!.directory, ticket.id)
+          observed = await workspaceStatus(snapshot, ticket.execution!.directory, ticket.id, this.existingExecution(ticket.id)?.branches)
           const missing = observed.filter(r => r.changed && !ids.includes(r.id)).map(r => r.id)
           if (missing.length) throw Error(`Report is missing changed repositories: ${missing.join(', ')}`)
           this.current(target)
@@ -372,12 +465,16 @@ export class Runtime {
   event(target: AgentTarget, event: AgentEvent): void {
     if (this.closing || target.role !== 'worker') return
     let ticket: Ticket
-    try { ticket = this.current(target) } catch { return }
+    try { ticket = this.current(target) } catch {
+      const ended = target.ticketId ? this.store.tickets.get(target.ticketId) : undefined
+      if (ended?.ended && latestAssignment(ended)?.id === target.assignmentId && ['settled', 'error'].includes(event.type)) this.releaseExisting(ended.id)
+      return
+    }
     if (event.type === 'read' && event.deliveryId) this.engine.inputsRead(ticket.id, [event.deliveryId])
     if (event.type === 'settled' || event.type === 'error') {
       this.busy.delete(ticket.id)
       if (event.type === 'error' || event.failed) this.store.atomic(() => {
-        const report = { state: 'failed' as const, summary: event.error || 'Agent run failed' }
+        const report = { state: 'failed' as const, question: null, summary: event.error || 'Agent run failed' }
         reportRelay(this.store, this.engine.report(ticket.id, report), report)
       })
       else {
@@ -385,12 +482,13 @@ export class Runtime {
         const report = latestReport(this.store.tickets.get(ticket.id)!)
         if (!report || report.state === 'progress') this.engine.report(ticket.id, { state: 'waiting', summary: 'Waiting for further input' })
       }
+      if (this.store.tickets.get(ticket.id)?.ended) this.releaseExisting(ticket.id)
     }
   }
   close(): Promise<void> { return this.closePromise ??= this.shutdown() }
   private async shutdown(): Promise<void> {
     this.closing = true; if (this.timer) clearInterval(this.timer)
     try { await Promise.all([this.github.close(), this.driver.close()]); await Promise.allSettled(this.running.values()) }
-    finally { this.store.close(); this.unlock() }
+    finally { await this.executionChange; for (const id of this.existingLocks.keys()) this.releaseExisting(id); this.store.close(); this.unlock() }
   }
 }

@@ -111,7 +111,7 @@ export class ContextReader {
     }
     if (r.kind === 'ticket') {
       const t = requireTicket()
-      return { ...ticketCard(t), mandate: t.mandate, origin: { triggerId: t.origin.triggerId, triggerIds: t.origin.triggerIds.slice(0, 20), total: t.origin.triggerIds.length }, attention: t.attention, follows: t.follows,
+      return { ...ticketCard(t), mandate: t.mandate, origin: { triggerId: t.origin.triggerId, triggerIds: t.origin.triggerIds.slice(0, 20), total: t.origin.triggerIds.length }, attention: t.attention, attentionResponse: t.attention && store.get(`attention-response:${t.attention.id}`), follows: t.follows,
         threads: store.threads.list().filter(thread => thread.subscriptions.includes(t.id)).slice(0, 20).map(thread => ({ key: thread.key, context: !!thread.context?.includes(t.id), read: { kind: 'thread', id: thread.key } })),
         ...(config.workspace ? { workspace: { kind: 'workspace', id: t.id } } : {}),
         inputs: { total: t.inputs.length, read: { kind: 'inputs', id: t.id } }, assignments: { total: t.assignments.length, read: { kind: 'assignments', id: t.id } } }

@@ -160,6 +160,8 @@ try {
   await client.request('tickets', 'POST', { id: 'stop-fixture', text: 'Wait for a human decision; do not complete yet.' })
   let stopped
   await waitFor(async () => { stopped = (await client.request('tickets')).find(t => t.attention?.question === 'Continue or stop?'); return !!stopped })
+  // This scenario exercises Router forwarding first; early answers now intentionally suppress stale attention relays.
+  await waitFor(() => observedKinds.has('worker_attention'))
   await client.request(`tickets/${stopped.id}/followup`, 'POST', { id: 'stop-followup', text: 'Please stop this task.' })
   await waitFor(async () => (await client.request(`tickets/${stopped.id}`)).ended?.by === 'human')
   assert(observedKinds.has('follow_up')); assert(observedKinds.has('worker_attention'))
