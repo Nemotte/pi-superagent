@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { userInfo, hostname } from 'node:os'
 import { randomUUID, createHash } from 'node:crypto'
 import { lock } from 'proper-lockfile'
@@ -75,8 +75,8 @@ function pinnedServiceEnvironment(stateDir: string): NodeJS.ProcessEnv {
   const env = serviceEnvironment(stateDir)
   const entry = Object.entries(env).find(([key]) => key.toUpperCase() === 'PATH')
   const value = typeof entry?.[1] === 'string' ? entry[1] : ''
-  // Later PATH entries win, but Node is not necessarily last: any entry that resolves to the running binary counts.
-  const pinned = value.replace(/^"(.*)"$/, '$1').split(':').filter(Boolean)
+  // Node need not be the first or last PATH entry; use the host delimiter so Windows drive letters stay intact.
+  const pinned = value.replace(/^"(.*)"$/, '$1').split(delimiter).filter(Boolean)
   const same = (path: string) => { try { return realpathSync(path) === realpathSync(process.execPath) } catch { return false } }
   if (!pinned.some(entry => same(join(entry, basename(process.execPath))))) throw new BackupError('SERVICE_IDENTITY')
   return env
